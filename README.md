@@ -1,3 +1,9 @@
+## Faster media download controls — October 20, 2026
+- On recognized YouTube watch/short/live URLs, the floating media download button appears without waiting for the media play event. On other websites, the button appears as soon as the page exposes an HTML5 audio/video element. YouTube SPA URL transitions are detected.
+- Tapping the button opens a structured MH Browser themed media download panel immediately. Format inspection continues asynchronously; video resolutions and audio conversion choices appear in the same panel when yt-dlp returns genuine available formats. A slow network or provider restriction can delay the options even though the panel opens instantly.
+- YouTube watch pages start a best-effort format prefetch when loaded, and the results are cached for repeat taps during the same browser session. Downloads still fetch media streams separately and cannot reuse all of WebView's playback cache.
+- No guarantee of a 1–2 second network extraction, download completion, or access to restricted/DRM media. Other browser features are preserved.
+
 ## Media download engine — October 20, 2026
 - MH Browser now integrates the open-source yt-dlp Android runtime and FFmpeg to inspect public media pages for actual available resolutions and offer video download or audio extraction to MP3/M4A where supported. Video/audio streams can be merged when required.
 - The floating media download button is displayed during media playback and launches a real format inspection. For directly exposed downloadable files, Android Download Manager remains an alternative.
