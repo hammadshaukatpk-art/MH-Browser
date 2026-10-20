@@ -17,6 +17,9 @@ import android.app.DownloadManager;
 import android.os.Environment;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
+import androidx.webkit.ProxyConfig;
+import androidx.webkit.ProxyController;
+import androidx.webkit.WebViewFeature;
 public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
@@ -29,7 +32,13 @@ public class BrowserActivity extends Activity {
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
- restoreTabs();showSplash();}
+ restoreTabs();if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
+  String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
+  if(!host.isEmpty()&&!port.isEmpty()){try{
+   ProxyConfig config=new ProxyConfig.Builder().addProxyRule("http://"+host+":"+port).build();
+   ProxyController.getInstance().setProxyOverride(config,getMainExecutor(),()->{});
+  }catch(Exception ignored){}}
+ }showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -395,7 +404,36 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(list,"Private browsing limitations","Incognito isolation is not yet production-ready",()->dialog("Incognito","Current private tabs may share site cookies with normal tabs. Do not use this preview for sensitive private sessions."));
  }
 
- void proxy(){LinearLayout list=column();list.setPadding(24,8,24,4);Spinner scheme=new Spinner(this);scheme.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"HTTP","HTTPS","SOCKS5"}));list.addView(scheme);EditText h=new EditText(this),p=new EditText(this),u=new EditText(this),pw=new EditText(this);h.setHint("Host / IP");p.setHint("Port");p.setInputType(2);u.setHint("Username (optional)");pw.setHint("Password (optional)");pw.setInputType(129);list.addView(h);list.addView(p);list.addView(u);list.addView(pw);themed().setTitle("Proxy settings (not active)").setMessage("WebView cannot reliably apply authenticated HTTP/SOCKS proxies via its public API. Saved values are not used for network traffic.").setView(list).setPositiveButton("Save inactive settings",(d,i)->{prefs.edit().putString("proxyHost",h.getText().toString()).putString("proxyPort",p.getText().toString()).putString("proxyType",scheme.getSelectedItem().toString()).apply();Toast.makeText(this,"Saved, proxy is NOT active",Toast.LENGTH_LONG).show();}).setNegativeButton("Cancel",null).show();}
+ void proxy(){
+  LinearLayout c=column();c.setPadding(dp(18),dp(8),dp(18),dp(8));
+  TextView info=text("HTTP/HTTPS proxy • no VPN. Authenticated proxies and SOCKS5 are not supported in this build.",13,GRAY);
+  c.addView(info);
+  EditText host=new EditText(this),port=new EditText(this);
+  host.setSingleLine(true);port.setSingleLine(true);port.setInputType(2);
+  host.setHint("Proxy host / IP");port.setHint("Port (1–65535)");
+  host.setText(prefs.getString("proxyHost",""));port.setText(prefs.getString("proxyPort",""));
+  c.addView(host);c.addView(port);
+  if(!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
+   dialog("Proxy unavailable","Your Android System WebView does not support proxy override.");return;
+  }
+  AlertDialog d=themed().setTitle("Proxy settings").setView(c)
+   .setNegativeButton("Cancel",null)
+   .setNeutralButton("Disable proxy",(x,n)->ProxyController.getInstance().clearProxyOverride(getMainExecutor(),()->{
+     prefs.edit().putBoolean("proxyActive",false).apply();Toast.makeText(this,"Proxy disabled",Toast.LENGTH_SHORT).show();
+   }))
+   .setPositiveButton("Apply proxy",null).create();
+  d.setOnShowListener(v->{styleDialog(d);d.getButton(-1).setOnClickListener(w->{
+   String h=host.getText().toString().trim(),p=port.getText().toString().trim();
+   if(h.isEmpty()||h.contains(" ")||h.contains("/")||h.contains("@")){host.setError("Enter a valid hostname or IP");return;}
+   int number;try{number=Integer.parseInt(p);}catch(Exception e){port.setError("Invalid port");return;}
+   if(number<1||number>65535){port.setError("Port must be 1–65535");return;}
+   ProxyConfig config=new ProxyConfig.Builder().addProxyRule("http://"+h+":"+number).build();
+   ProxyController.getInstance().setProxyOverride(config,getMainExecutor(),()->{
+    prefs.edit().putString("proxyHost",h).putString("proxyPort",p).putBoolean("proxyActive",true).apply();
+    Toast.makeText(this,"HTTP proxy applied to WebView",Toast.LENGTH_LONG).show();
+   });d.dismiss();
+  });});d.show();
+ }
  @Override public void onBackPressed(){
   if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
