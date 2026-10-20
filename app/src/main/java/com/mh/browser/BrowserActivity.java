@@ -35,6 +35,7 @@ public class BrowserActivity extends Activity {
  final Map<String,java.util.List<MediaDownloadEngine.Choice>> mediaFormatCache=new HashMap<>();
  final Map<String,String> mediaTitleCache=new HashMap<>();
  final Map<String,JSONArray> directMediaCache=new HashMap<>();
+ final Map<WebView,TextView> tabTitleViews=new HashMap<>();
  final Set<String> mediaInspecting=new HashSet<>();
  final Handler downloadUiHandler=new Handler(Looper.getMainLooper());
  final Map<String,TextView> downloadStatusViews=new HashMap<>();
@@ -163,7 +164,17 @@ public class BrowserActivity extends Activity {
 
  WebView active(){return tabs.get(index).web;}
  String url(String s){s=s.trim();if(s.isEmpty())return "about:blank";if(s.startsWith("https://")||s.startsWith("http://")||s.equals("about:blank"))return s;if(s.contains(".")&&!s.contains(" "))return "https://"+s;return "https://www.google.com/search?q="+Uri.encode(s);}
- void navigate(String target){String dest=url(target);if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();if(dest.equals("about:blank")){active().loadUrl(dest);display();}else{body.removeAllViews();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));if(prefs.getBoolean("dnt",false)){java.util.Map<String,String> h=new java.util.HashMap<>();h.put("DNT","1");w.loadUrl(dest,h);}else w.loadUrl(dest);display();}}
+ void navigate(String target){
+  String dest=url(target);
+  if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();
+  WebView w=active();
+  if(dest.equals("about:blank")){w.loadUrl(dest);display();return;}
+  // Keep WebView attached during navigation; reparenting it repeatedly flashes.
+  if(prefs.getBoolean("dnt",false)){
+   java.util.Map<String,String> h=new java.util.HashMap<>();h.put("DNT","1");w.loadUrl(dest,h);
+  }else w.loadUrl(dest);
+  if(screen!=0)display();
+ }
 
  void header(){
   head.setBackgroundColor(BG);
@@ -216,7 +227,59 @@ public class BrowserActivity extends Activity {
    if(prefs.getBoolean("proxyActive",false)&&host.equalsIgnoreCase(prefs.getString("proxyHost",""))&&!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
    else handler.cancel();
   }
-  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;mediaAvailable=isMediaPage(u);updateMediaOverlay();if(isMediaPage(u))prefetchMediaFormats(u);if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();if(isMediaPage(u)){mediaAvailable=true;updateMediaOverlay();prefetchMediaFormats(u);}}
+  @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){
+   if(!request.isForMainFrame())return false;
+   Uri target=request.getUrl();String scheme=target.getScheme();
+   if(scheme==null)return false;
+   if(scheme.equalsIgnoreCase("http")||scheme.equalsIgnoreCase("https")||scheme.equalsIgnoreCase("about"))return false;
+   if(scheme.equalsIgnoreCase("fb")){
+    // Facebook search results sometimes point to fb://native_post/... .
+    try{
+     Intent app=new Intent(Intent.ACTION_VIEW,target);
+     app.addCategory(Intent.CATEGORY_BROWSABLE);
+     if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+    }catch(Exception ignored){}
+    view.loadUrl("https://www.facebook.com/");
+    Toast.makeText(BrowserActivity.this,"Facebook app link opened in Facebook website",Toast.LENGTH_SHORT).show();
+    return true;
+   }
+   if(scheme.equalsIgnoreCase("intent")){
+    try{
+     Intent app=Intent.parseUri(target.toString(),Intent.URI_INTENT_SCHEME);
+     app.addCategory(Intent.CATEGORY_BROWSABLE);
+     app.setComponent(null);app.setSelector(null);
+     if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+     String fallback=app.getStringExtra("browser_fallback_url");
+     if(fallback!=null&&(fallback.startsWith("https://")||fallback.startsWith("http://"))){view.loadUrl(fallback);return true;}
+    }catch(Exception ignored){}
+    Toast.makeText(BrowserActivity.this,"This link needs another app",Toast.LENGTH_SHORT).show();
+    return true;
+   }
+   try{
+    Intent app=new Intent(Intent.ACTION_VIEW,target);
+    app.addCategory(Intent.CATEGORY_BROWSABLE);
+    if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+   }catch(Exception ignored){}
+   Toast.makeText(BrowserActivity.this,"No app available to open this link",Toast.LENGTH_SHORT).show();
+   return true;
+  }
+  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
+   if(v==active()){
+    mediaPlaying=false;mediaAvailable=isMediaPage(u);updateMediaOverlay();
+    if(isMediaPage(u))prefetchMediaFormats(u);
+    if(!showingSettings&&screen==0&&webPageLayer==null&&u!=null&&!"about:blank".equals(u)){
+     v.post(()->{if(v==active()&&screen==0&&webPageLayer==null&&!showingSettings)display();});
+    }
+    if(address!=null&&u!=null)address.setText(u.equals("about:blank")?"":u);
+   }
+  }
+  @Override public void onPageFinished(WebView v,String u){
+   if(v==active()&&!showingSettings){
+    if(screen==0&&webPageLayer==null&&u!=null&&!"about:blank".equals(u))display();
+    if(address!=null)address.setText(u.equals("about:blank")?"":u);
+    if(isMediaPage(u)){mediaAvailable=true;updateMediaOverlay();prefetchMediaFormats(u);}
+   }
+   refreshTabTitle(v);
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;var found=false,lastHref=location.href;function watch(){if(location.href!==lastHref){lastHref=location.href;found=false;MHMedia.pageChanged()}var media=document.querySelectorAll('video,audio');if(media.length&&!found){found=true;MHMedia.found()}media.forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){
@@ -238,6 +301,7 @@ public class BrowserActivity extends Activity {
   controls();
  }
  void tabStrip(){
+  tabTitleViews.clear();
   HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
   sc.setFillViewport(false);sc.setBackgroundColor(0xff0a1b31);head.addView(sc,new LinearLayout.LayoutParams(-1,dp(51)));
   LinearLayout row=row();row.setPadding(dp(10),dp(5),dp(10),dp(5));sc.addView(row);
@@ -247,10 +311,19 @@ public class BrowserActivity extends Activity {
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(138),dp(39));lp.rightMargin=dp(7);row.addView(pill,lp);
    String name=t.web.getTitle();if(name==null||name.isEmpty()||"about:blank".equals(t.web.getUrl()))name="New tab";
    TextView title=text((t.incognito?"◉ ":"")+name,12,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-   pill.addView(title,new LinearLayout.LayoutParams(0,-1,1));title.setOnClickListener(v->{index=n;display();});
+   pill.addView(title,new LinearLayout.LayoutParams(0,-1,1));tabTitleViews.put(t.web,title);title.setOnClickListener(v->{index=n;display();});
    TextView x=action("×",20,()->closeTab(n));pill.addView(x,new LinearLayout.LayoutParams(dp(27),-1));
   }
   TextView add=action("+",27,()->createTab(false));add.setBackground(bg(PANEL));row.addView(add,new LinearLayout.LayoutParams(dp(39),dp(39)));
+ }
+ void refreshTabTitle(WebView w){
+  TextView title=tabTitleViews.get(w);
+  if(title==null)return;
+  String name=w.getTitle();
+  if(name==null||name.isEmpty()||"about:blank".equals(w.getUrl()))name="New tab";
+  boolean inc=false;
+  for(Tab t:tabs)if(t.web==w){inc=t.incognito;break;}
+  title.setText((inc?"◉ ":"")+name);
  }
  void closeTab(int n){
   if(n<0||n>=tabs.size())return;
