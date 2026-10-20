@@ -30,7 +30,7 @@ public class BrowserActivity extends Activity {
  boolean inPip=false;
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs;
- static class Tab {WebView web; boolean incognito; Tab(WebView w,boolean p){web=w;incognito=p;}}
+ static class Tab {WebView web; boolean incognito,desktop; Tab(WebView w,boolean p,boolean d){web=w;incognito=p;desktop=d;}}
  LinearLayout column(){LinearLayout l=new LinearLayout(this);l.setOrientation(1);return l;}
  LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(0);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
  TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
@@ -85,7 +85,7 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(46),dp(48)));
  }
 
- void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false))s.setUserAgentString(s.getUserAgentString().replace("Mobile","").replace("Android","X11; Linux x86_64"));if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -108,7 +108,7 @@ public class BrowserActivity extends Activity {
   }
  });
  w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
- tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
+ tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
   HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
@@ -213,22 +213,60 @@ public class BrowserActivity extends Activity {
   Button priv=new Button(this);priv.setText("+ Private tab");items.addView(priv);priv.setOnClickListener(v->createTab(true));
  }
 
+
  void menu(){
- String[] choices={"＋ New tab","◉ New private tab","▣ Switch tabs","☆ Bookmarks","◷ History","↓ Downloads","⚙ Settings","↗ Share page","▤ Desktop site","◫ Picture in picture"};
- themed().setTitle("MH Browser").setItems(choices,(d,i)->{
-  switch(i){
-   case 0:createTab(false);break;case 1:createTab(true);break;case 2:tabPicker();break;
-   case 3:bookmarks();break;case 4:history();break;case 5:downloads();break;case 6:settings();break;
-   case 7:Intent share=new Intent(Intent.ACTION_SEND);share.setType("text/plain");share.putExtra(Intent.EXTRA_TEXT,active().getUrl());startActivity(Intent.createChooser(share,"Share page"));break;
-   case 8:toggleDesktop();break;case 9:pictureInPicture();break;
-  }
- }).show();
+  ScrollView sc=new ScrollView(this);sc.setFillViewport(false);
+  LinearLayout list=column();list.setPadding(dp(16),dp(16),dp(16),dp(14));sc.addView(list);
+  LinearLayout brand=column();brand.setGravity(Gravity.CENTER);list.addView(brand);
+  ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.app_logo);
+  brand.addView(logo,new LinearLayout.LayoutParams(dp(58),dp(58)));
+  TextView heading=text("MH Browser",21,WHITE);heading.setTypeface(null,Typeface.BOLD);heading.setGravity(Gravity.CENTER);
+  brand.addView(heading);
+  TextView sub=text("Fast  •  Private  •  Secure",11,GRAY);sub.setGravity(Gravity.CENTER);brand.addView(sub);
+  menuLabel(list,"TABS & NAVIGATION");
+  AlertDialog d=themed().setView(sc).create();
+  menuItem(list,"＋","New tab","Open another browser tab",()->createTab(false),d);
+  menuItem(list,"◉","New private tab","Private browsing preview",()->createTab(true),d);
+  menuItem(list,"▣","Switch tabs","Choose an open tab",this::tabPicker,d);
+  menuLabel(list,"YOUR BROWSING");
+  menuItem(list,"☆","Bookmarks","Save and manage websites",this::bookmarks,d);
+  menuItem(list,"◷","History","Today, previous days, weeks and more",this::history,d);
+  menuItem(list,"↓","Downloads","Files saved by Android",this::downloads,d);
+  menuLabel(list,"TOOLS & SETTINGS");
+  menuItem(list,"⚙","Settings","Customize MH Browser",this::settings,d);
+  menuItem(list,"▤","Desktop site",tabs.get(index).desktop?"Enabled for this tab":"Request a desktop layout",this::toggleDesktop,d);
+  menuItem(list,"◫","Picture in picture","Fullscreen video only",this::pictureInPicture,d);
+  menuItem(list,"↗","Share page","Send this website to another app",()->{
+   Intent share=new Intent(Intent.ACTION_SEND);share.setType("text/plain");share.putExtra(Intent.EXTRA_TEXT,active().getUrl());
+   startActivity(Intent.createChooser(share,"Share page"));
+  },d);
+  d.show();styleDialog(d);
+  if(d.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();d.getWindow().setLayout((int)(m.widthPixels*0.91f),Math.min(dp(690),(int)(m.heightPixels*0.83f)));}
+ }
+ void menuLabel(LinearLayout list,String label){
+  TextView v=text(label,11,0xff68d5ff);v.setTypeface(null,Typeface.BOLD);
+  v.setPadding(dp(8),dp(18),0,dp(8));list.addView(v);
+ }
+ void menuItem(LinearLayout list,String symbol,String label,String desc,Runnable action,AlertDialog d){
+  LinearLayout r=row();r.setPadding(dp(11),dp(9),dp(9),dp(9));r.setBackground(grad(0xff193653,0xff10263e,13));
+  LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(6);list.addView(r,lp);
+  TextView icon=text(symbol,23,0xff82dfff);icon.setGravity(Gravity.CENTER);r.addView(icon,new LinearLayout.LayoutParams(dp(41),dp(47)));
+  LinearLayout words=column();r.addView(words,new LinearLayout.LayoutParams(0,-2,1));
+  TextView name=text(label,15,WHITE);name.setTypeface(null,Typeface.BOLD);words.addView(name);
+  words.addView(text(desc,11,GRAY));r.addView(text("›",23,GRAY));
+  r.setOnClickListener(v->{d.dismiss();action.run();});
+ }
+ String desktopAgent(){
+  String ua=WebSettings.getDefaultUserAgent(this);
+  return ua.replaceAll("\\(Linux; Android[^)]*\\)","(X11; Linux x86_64)").replace(" Mobile "," ").replace("; wv","");
  }
  void toggleDesktop(){
-  WebSettings w=active().getSettings();boolean enabled=!prefs.getBoolean("desktop",false);
-  prefs.edit().putBoolean("desktop",enabled).apply();String agent=WebSettings.getDefaultUserAgent(this);
-  w.setUserAgentString(enabled?agent.replace("Mobile","").replace("Android","X11; Linux x86_64"):agent);
-  active().reload();Toast.makeText(this,enabled?"Desktop mode enabled":"Mobile mode enabled",Toast.LENGTH_SHORT).show();
+  Tab t=tabs.get(index);t.desktop=!t.desktop;
+  WebSettings w=t.web.getSettings();
+  w.setUserAgentString(t.desktop?desktopAgent():WebSettings.getDefaultUserAgent(this));
+  w.setUseWideViewPort(t.desktop);w.setLoadWithOverviewMode(t.desktop);
+  if(t.web.getUrl()!=null&&t.web.getUrl().startsWith("http"))t.web.reload();
+  Toast.makeText(this,t.desktop?"Desktop site requested":"Mobile site requested",Toast.LENGTH_SHORT).show();
  }
  void pictureInPicture(){
   if(Build.VERSION.SDK_INT<26){dialog("Picture in picture","Android 8 or newer is required.");return;}
