@@ -1142,7 +1142,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   mediaAvailable=true;updateMediaOverlay();
   String path=media.getPath()==null?"":media.getPath().toLowerCase(Locale.ROOT);
   if(path.endsWith(".mpd"))return; // DASH may be DRM protected: do not offer raw manifest downloads
-  String kind=path.endsWith(".m3u8")?"HLS":path.matches(".*\\\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
+  String kind=path.endsWith(".m3u8")?"HLS":path.matches(".*\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
   JSONArray direct=directMediaCache.get(page);
   if(direct==null){direct=new JSONArray();directMediaCache.put(page,direct);}
   if(direct.length()>=12)return;
@@ -1177,10 +1177,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "var path;try{path=new URL(u).pathname.toLowerCase()}catch(e){return}"+
    "var audio=m.tagName.toLowerCase()==='audio'||typ.indexOf('audio/')===0||/\\.(mp3|m4a|aac|wav|ogg|opus|flac)$/.test(path);"+
    "var video=typ.indexOf('video/')===0||/\\.(mp4|webm|mov|m4v|3gp)$/.test(path);"+
-   "if(!audio&&!video)return;"+
+   "var hls=/\\.m3u8$/.test(path)||/mpegurl/.test(typ);"+
+   "if(!audio&&!video&&!hls)return;"+
    "seen[u]=1;var q=x.getAttribute('label')||x.getAttribute('res')||x.getAttribute('size')||'';"+
    "if(!q&&m.videoHeight&&m.tagName.toLowerCase()==='video')q=m.videoHeight+'p';"+
-   "out.push({url:u,type:typ,kind:audio?'Audio':'Video',label:q});"+
+   "out.push({url:u,type:typ,kind:hls?'HLS':audio?'Audio':'Video',label:q});"+
    "});});"+
    "document.querySelectorAll('a[href]').forEach(function(a){var u=a.href;if(!u||seen[u]||!/^https?:\\/\\//i.test(u))return;"+
    "var path;try{path=new URL(u).pathname.toLowerCase()}catch(e){return}"+
@@ -1198,8 +1199,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     JSONObject o=found.optJSONObject(i);if(o==null)continue;
     String link=o.optString("url");
     if(!link.startsWith("https://")&&!link.startsWith("http://"))continue;
-    if(link.matches("(?i).*\\.(m3u8|mpd)(\\?.*)?$"))continue;
-    if(!"Video".equals(o.optString("kind"))&&!"Audio".equals(o.optString("kind")))continue;
+    if(link.matches("(?i).*\\.mpd(\\?.*)?$"))continue;
+    if(!"Video".equals(o.optString("kind"))&&!"Audio".equals(o.optString("kind"))&&!"HLS".equals(o.optString("kind")))continue;
     valid.put(o);
    }
   }catch(Exception ignored){}
