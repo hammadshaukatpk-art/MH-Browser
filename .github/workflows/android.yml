@@ -33,9 +33,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-background"
+          TAG="v1.0-media-20261020-playback"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Background Downloads" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Includes yt-dlp and FFmpeg. Device-level media download testing is still required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Playback Fix" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Adds a built-in player, tap-to-play completion notifications, Android-friendly format preference and faster format lookup. Real-device testing is still required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
