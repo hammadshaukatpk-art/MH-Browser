@@ -528,28 +528,12 @@ public class BrowserActivity extends Activity {
   card.setBackground(grad(0xff1a405b,0xff123047,14));
   LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
   cp.bottomMargin=dp(11);panel.addView(card,cp);
-  // WhatsApp-style green speech bubble and phone symbol, drawn locally.
-  View icon=new View(this){
-   android.graphics.Paint p=new android.graphics.Paint(3);
-   @Override protected void onDraw(android.graphics.Canvas c){
-    super.onDraw(c);
-    float cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(getWidth(),getHeight())*.46f;
-    p.setColor(0xff25d366);p.setStyle(android.graphics.Paint.Style.FILL);
-    c.drawCircle(cx,cy,r,p);
-    android.graphics.Path tail=new android.graphics.Path();
-    tail.moveTo(cx-r*.73f,cy+r*.49f);
-    tail.lineTo(cx-r*.93f,cy+r*.95f);
-    tail.lineTo(cx-r*.30f,cy+r*.77f);tail.close();c.drawPath(tail,p);
-    p.setColor(Color.WHITE);p.setStyle(android.graphics.Paint.Style.STROKE);
-    p.setStrokeWidth(dp(2.7f));p.setStrokeCap(android.graphics.Paint.Cap.ROUND);
-    android.graphics.RectF arc=new android.graphics.RectF(cx-r*.56f,cy-r*.57f,cx+r*.55f,cy+r*.56f);
-    c.drawArc(arc,130,275,false,p);
-    p.setStrokeWidth(dp(3.3f));
-    c.drawLine(cx-r*.37f,cy-r*.29f,cx-r*.13f,cy-r*.05f,p);
-    c.drawLine(cx+r*.13f,cy+r*.12f,cx+r*.37f,cy+r*.28f,p);
-    p.setStyle(android.graphics.Paint.Style.FILL);
-   }
-  };
+  // Official-style WhatsApp mark: white vector glyph on WhatsApp green.
+  ImageView icon=new ImageView(this);
+  icon.setImageResource(R.drawable.ic_whatsapp_brand);
+  icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+  icon.setBackground(bg(0xff25d366));
+  icon.setPadding(dp(8),dp(8),dp(8),dp(8));
   card.addView(icon,new LinearLayout.LayoutParams(dp(43),dp(43)));
   LinearLayout info=column();info.setPadding(dp(13),0,0,0);
   card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
