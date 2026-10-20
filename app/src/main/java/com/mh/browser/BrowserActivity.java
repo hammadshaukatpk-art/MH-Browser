@@ -89,7 +89,7 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
- void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -120,7 +120,7 @@ public class BrowserActivity extends Activity {
    if(prefs.getBoolean("proxyActive",false)&&host.equalsIgnoreCase(prefs.getString("proxyHost",""))&&!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
    else handler.cancel();
   }
-  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
+  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;updateMediaOverlay();if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;function watch(){document.querySelectorAll('video,audio').forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){
@@ -156,7 +156,7 @@ public class BrowserActivity extends Activity {
   }
   TextView add=action("+",27,()->createTab(false));add.setBackground(bg(PANEL));row.addView(add,new LinearLayout.LayoutParams(dp(39),dp(39)));
  }
- void closeTab(int n){if(n<0||n>=tabs.size())return;Tab old=tabs.remove(n);old.web.stopLoading();old.web.destroy();
+ void closeTab(int n){if(n<0||n>=tabs.size())return;mediaPlaying=false;updateMediaOverlay();Tab old=tabs.remove(n);old.web.stopLoading();old.web.destroy();
   if(tabs.isEmpty()){index=-1;createTab(false);}else{if(n<index)index--;else if(n==index)index=Math.min(n,tabs.size()-1);display();}}
  void tabActions(){String[] options={"New tab","New private tab","Close current tab","Switch tab"};themed().setTitle("Tabs").setItems(options,(d,n)->{if(n==0)createTab(false);else if(n==1)createTab(true);else if(n==2)closeTab(index);else tabPicker();}).show();}
  void tabPicker(){String[] names=new String[tabs.size()];for(int i=0;i<tabs.size();i++){String t=tabs.get(i).web.getTitle();names[i]=(tabs.get(i).incognito?"◉ ":"")+(t==null?"New tab":t);}themed().setTitle("Switch tab").setSingleChoiceItems(names,index,(d,n)->{index=n;d.dismiss();display();}).setNegativeButton("Close",null).show();}
@@ -261,6 +261,7 @@ public class BrowserActivity extends Activity {
   Uri parsed=Uri.parse(target);String host=parsed.getHost();
   if(host==null||host.isEmpty())return;
   host=host.toLowerCase(Locale.ROOT);
+  image.setTag(host);
   Bitmap cached=shortcutIconCache.get(host);
   if(cached!=null){image.setImageBitmap(cached);return;}
   final String domain=host;
@@ -280,7 +281,7 @@ public class BrowserActivity extends Activity {
     if(bmp==null)return;
     shortcutIconCache.put(domain,bmp);
     final Bitmap icon=bmp;
-    runOnUiThread(()->{if(image.getParent()!=null)image.setImageBitmap(icon);});
+    runOnUiThread(()->{if(image.getParent()!=null&&domain.equals(image.getTag()))image.setImageBitmap(icon);});
    }catch(Exception ignored){}
    finally{if(connection!=null)connection.disconnect();}
   }).start();
@@ -674,7 +675,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      boolean audio=type.contains("audio")||link.matches("(?i).*\\.(mp3|m4a|aac|wav|ogg)(\\?.*)?$");
      names.add((audio?"Audio":"Video")+" • "+(label.isEmpty()?"Original source":label));valid.put(o);
     }
-    if(names.isEmpty()){dialog("Media downloads","No directly downloadable audio or video file was exposed by this page.");return;}
+    if(names.isEmpty()){dialog("Media downloads","This page does not expose a direct audio or video file. Some services, including YouTube, use streaming formats that cannot be downloaded or converted to MP3 through this browser feature.");return;}
     themed().setTitle("Available media").setItems(names.toArray(new String[0]),(d,n)->{
      JSONObject o=valid.optJSONObject(n);String link=o.optString("url");String mime=o.optString("type");
      String filename=URLUtil.guessFileName(link,null,mime);
