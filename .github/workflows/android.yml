@@ -41,9 +41,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-external-player"
+          TAG="v1.0-media-20261020-player-router"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - External Media Player" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Opens completed downloads externally from notifications and Downloads, removes duplicate percentage text, and keeps automatic yt-dlp updates. Real-device testing is still required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Player Launch Fix" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Uses a dedicated explicit Android launcher for notifications and Downloads, shows a visible Open button, validates saved-file accessibility and rejects audio-only video files. Real-device testing is still required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
