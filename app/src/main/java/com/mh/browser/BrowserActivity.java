@@ -53,7 +53,7 @@ public class BrowserActivity extends Activity {
 
  WebView active(){return tabs.get(index).web;}
  String url(String s){s=s.trim();if(s.isEmpty())return "about:blank";if(s.startsWith("https://")||s.startsWith("http://")||s.equals("about:blank"))return s;if(s.contains(".")&&!s.contains(" "))return "https://"+s;return "https://www.google.com/search?q="+Uri.encode(s);}
- void navigate(String target){String dest=url(target);if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();if(dest.equals("about:blank")){active().loadUrl(dest);display();}else{body.removeAllViews();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));w.loadUrl(dest);display();}}
+ void navigate(String target){String dest=url(target);if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();if(dest.equals("about:blank")){active().loadUrl(dest);display();}else{body.removeAllViews();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));if(prefs.getBoolean("dnt",false)){java.util.Map<String,String> h=new java.util.HashMap<>();h.put("DNT","1");w.loadUrl(dest,h);}else w.loadUrl(dest);display();}}
 
  void header(){
   head.setBackgroundColor(BG);
@@ -71,9 +71,26 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(46),dp(48)));
  }
 
- void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false))s.setUserAgentString(s.getUserAgentString().replace("Mobile","").replace("Android","X11; Linux x86_64"));if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false))s.setUserAgentString(s.getUserAgentString().replace("Mobile","").replace("Android","X11; Linux x86_64"));if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
- w.setWebChromeClient(new WebChromeClient(){@Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb){cb.invoke(origin,false,false);}});
+ w.setDownloadListener((link,userAgent,disposition,mime,length)->{
+  String filename=URLUtil.guessFileName(link,disposition,mime);
+  themed().setTitle("Download file").setMessage(filename+" • "+(length>0?(length/1024)+" KB":"Size unknown"))
+   .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
+ });
+ w.setWebChromeClient(new WebChromeClient(){
+  @Override public boolean onJsAlert(WebView view,String url,String message,JsResult result){
+   themed().setTitle("Website message").setMessage(message).setPositiveButton("OK",(d,n)->result.confirm()).setOnCancelListener(d->result.cancel()).show();return true;
+  }
+  @Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb){
+   if(!prefs.getBoolean("location",false)){cb.invoke(origin,false,false);return;}
+   boolean granted=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+   if(!granted){cb.invoke(origin,false,false);runOnUiThread(()->dialog("Location permission","Enable precise location for MH Browser in Android App Settings."));return;}
+   runOnUiThread(()->themed().setTitle("Location permission").setMessage("Allow "+origin+" to access your device location?")
+    .setNegativeButton("Deny",(d,n)->cb.invoke(origin,false,false))
+    .setPositiveButton("Allow",(d,n)->cb.invoke(origin,true,false)).show());
+  }
+ });
  w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&address!=null)address.setText(u.equals("about:blank")?"":u);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
  void display(){showingSettings=false;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
@@ -282,7 +299,18 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }catch(Exception ignored){}
   dialog("Network information","Connection: "+type+"\nPublic IP and IP-based city cannot be reliably determined offline. Device GPS location and network IP location are different.");
  }
- void downloads(){dialog("Downloads","Direct file downloads use Android Download Manager. Downloads from streaming/DRM websites or video quality selection are not generally available.");}
+ void downloads(){dialog("Downloads","Direct files are saved with Android Download Manager. Streaming/DRM websites may not provide downloadable media or resolution choices.");}
+ void startDownload(String link,String filename,String mime){
+  try{
+   Uri u=Uri.parse(link);if(!"https".equals(u.getScheme())&&!"http".equals(u.getScheme())){dialog("Download unavailable","Only HTTP/HTTPS files are supported.");return;}
+   DownloadManager.Request req=new DownloadManager.Request(u);
+   req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+   req.setTitle(filename);if(mime!=null)req.setMimeType(mime);
+   req.setDestinationInExternalFilesDir(this,Environment.DIRECTORY_DOWNLOADS,filename);
+   ((DownloadManager)getSystemService(DOWNLOAD_SERVICE)).enqueue(req);
+   Toast.makeText(this,"Download started",Toast.LENGTH_SHORT).show();
+  }catch(Exception e){dialog("Download failed","The file could not be queued.");}
+ }
  void general(){
   head.removeAllViews();body.removeAllViews();sectionHeader("General",this::settings);
   LinearLayout l=settingContent();
