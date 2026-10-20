@@ -27,7 +27,7 @@ public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
  View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer;
- boolean inPip=false;
+ boolean inPip=false, inlineVideoFocus=false, mediaPlaying=false, privateOnly=false;
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs;
  static class Tab {WebView web; boolean incognito,desktop; Tab(WebView w,boolean p,boolean d){web=w;incognito=p;desktop=d;}}
@@ -43,7 +43,7 @@ public class BrowserActivity extends Activity {
    ProxyConfig config=new ProxyConfig.Builder().addProxyRule("http://"+host+":"+port).build();
    ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{});
   }catch(Exception ignored){}}
- }restoreTabs();showSplash();}
+ }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -85,13 +85,17 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(46),dp(48)));
  }
 
- void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){if(inc&&!privateOnly){startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
   themed().setTitle("Download file").setMessage(filename+" • "+(length>0?(length/1024)+" KB":"Size unknown"))
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
+ w.addJavascriptInterface(new Object(){
+  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;}});}
+  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active())mediaPlaying=false;});}
+ },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
   @Override public void onHideCustomView(){hideVideo();}
@@ -107,7 +111,8 @@ public class BrowserActivity extends Activity {
     .setPositiveButton("Allow",(d,n)->cb.invoke(origin,true,false)).show());
   }
  });
- w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
+ w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
+ v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;function watch(){document.querySelectorAll('video,audio').forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
@@ -147,7 +152,7 @@ public class BrowserActivity extends Activity {
   profile.setOnClickListener(v->googleAccount());
 
   if(tabs.get(index).incognito){
-    TextView warning=text("Private tab preview: full cookie isolation is not yet implemented.",13,0xffffd597);
+    TextView warning=text("Private session • separate browser storage. Close all private tabs to end this session.",13,0xff9bdbff);
     warning.setPadding(dp(12),dp(12),dp(12),dp(12));warning.setBackground(bg(PANEL));c.addView(warning);
   }
   TextView caption=text("Discover the web",19,WHITE);caption.setTypeface(null,Typeface.BOLD);
@@ -289,7 +294,25 @@ public class BrowserActivity extends Activity {
  }
  void pictureInPicture(){
   if(Build.VERSION.SDK_INT<26){dialog("Picture in picture","Android 8 or newer is required.");return;}
-  if(fullscreenVideo==null){dialog("Video-only Picture in Picture","First play a video and enter its fullscreen player, then choose Picture in Picture. This prevents the browser tabs and address bar from appearing in the floating window.");return;}
+  if(fullscreenVideo==null&&!inlineVideoFocus){
+   active().evaluateJavascript("(function(){var v=document.querySelector('video');return !!(v&&!v.paused&&!v.ended);})()",result->{
+    if(!"true".equals(result)){dialog("Picture in Picture","Play a video first. The website must allow its video to continue in Picture in Picture.");return;}
+    focusInlineVideo();enterVideoPip();
+   });return;
+  }
+  enterVideoPip();
+ }
+ void focusInlineVideo(){
+  if(inlineVideoFocus||fullscreenVideo!=null)return;
+  inlineVideoFocus=true;head.setVisibility(View.GONE);bar.setVisibility(View.GONE);
+  active().evaluateJavascript("(function(){var v=document.querySelector('video');if(!v)return;var st=document.createElement('style');st.id='mh-video-pip-style';st.textContent='html,body{background:#000!important;overflow:hidden!important}video{position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483647!important;background:#000!important}';document.documentElement.appendChild(st);for(var p=v.parentElement;p&&p!==document.body;p=p.parentElement){p.setAttribute('data-mh-pip','1');p.style.setProperty('transform','none','important');p.style.setProperty('overflow','visible','important');}})()",null);
+ }
+ void restoreInlineVideo(){
+  if(!inlineVideoFocus)return;inlineVideoFocus=false;
+  if(index>=0){active().evaluateJavascript("(function(){var st=document.getElementById('mh-video-pip-style');if(st)st.remove();document.querySelectorAll('[data-mh-pip]').forEach(function(p){p.style.removeProperty('transform');p.style.removeProperty('overflow');p.removeAttribute('data-mh-pip')});})()",null);}
+  head.setVisibility(View.VISIBLE);bar.setVisibility(View.VISIBLE);
+ }
+ void enterVideoPip(){
   try{
    android.app.PictureInPictureParams params=new android.app.PictureInPictureParams.Builder()
     .setAspectRatio(new Rational(16,9)).build();
@@ -318,11 +341,11 @@ public class BrowserActivity extends Activity {
  @Override public void onPictureInPictureModeChanged(boolean pip,Configuration config){
   super.onPictureInPictureModeChanged(pip,config);inPip=pip;
   if(videoLayer!=null){videoLayer.setVisibility(View.VISIBLE);}
-  if(!pip&&fullscreenVideo==null)display();
+  if(!pip){restoreInlineVideo();if(fullscreenVideo==null)display();}
  }
  @Override public void onUserLeaveHint(){
   super.onUserLeaveHint();
-  if(fullscreenVideo!=null&&Build.VERSION.SDK_INT>=26&&prefs.getBoolean("audio",true))pictureInPicture();
+  if(Build.VERSION.SDK_INT>=26&&prefs.getBoolean("audio",true)&&mediaPlaying)pictureInPicture();
  }
 
  class MhDialogBuilder extends AlertDialog.Builder {
@@ -401,6 +424,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   });});d.show();
  }
  void saveTabs(){
+  if(privateOnly)return;
   JSONArray a=new JSONArray();int selectedNormal=0;
   for(int i=0;i<tabs.size();i++){
    Tab t=tabs.get(i);if(t.incognito)continue;
@@ -663,6 +687,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   });});d.show();
  }
  @Override public void onBackPressed(){
+  if(inlineVideoFocus){restoreInlineVideo();return;}
   if(fullscreenVideo!=null){hideVideo();return;}
   if(screen==6||screen==7){display();return;}if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
@@ -672,5 +697,5 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false)&&!inPip)for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
  @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
- @Override protected void onDestroy(){if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}super.onDestroy();}
+ @Override protected void onDestroy(){if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();}super.onDestroy();}
 }
