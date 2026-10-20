@@ -1450,7 +1450,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      String referer=source.optString("referer",w==null?"":w.getUrl());
      String agent=w==null?null:w.getSettings().getUserAgentString();
      MediaDownloadService.enqueue(getApplicationContext(),link,
-      new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent);
+      new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent,mediaTitleForDownload(w==null?null:w.getUrl()));
      Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
     }else startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
    });
