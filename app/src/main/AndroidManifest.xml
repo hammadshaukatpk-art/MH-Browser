@@ -3,12 +3,17 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <application android:allowBackup="false" android:label="MH Browser" android:icon="@drawable/app_logo" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="false">
+    <application android:allowBackup="false" android:label="MH Browser" android:icon="@drawable/app_logo" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="false" android:extractNativeLibs="true">
         <activity android:name=".BrowserActivity" android:resizeableActivity="true" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
         <activity android:name=".PrivateBrowserActivity" android:process=":private"
             android:exported="false" android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="com.mh.browser.fileprovider"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
