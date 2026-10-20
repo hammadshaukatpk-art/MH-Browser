@@ -1358,11 +1358,19 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if(activeMediaDialog==dialog){activeMediaDialog=null;activeDirectMediaOptions=null;activeMediaPage=null;}
   });
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
-   dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),Math.min(dp(680),(int)(m.heightPixels*0.82f)));}
+   dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),WindowManager.LayoutParams.WRAP_CONTENT);}
+  final boolean[] verifiedFormats={false};
+  final boolean[] embeddedSearching={false};
+  final String[] lastFormatError={""};
   boolean knownMediaPage=isMediaPage(initialUrl)||isNetworkMediaUrl(Uri.parse(initialUrl));
-  if(knownMediaPage||mediaFormatCache.containsKey(initialUrl))
-   addFormatChoices(quickOptions,initialUrl,mediaFormatCache.containsKey(initialUrl)?mediaFormatCache.get(initialUrl):quickChoices,dialog);
-  else state.setText("Play the video first. Detecting embedded players and direct media streams; page-only links may not be downloadable.");
+  if(mediaFormatCache.containsKey(initialUrl)){
+   verifiedFormats[0]=true;
+   addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
+  }else state.setText("Checking the playing video and embedded players for actual video resolutions and audio formats…");
+  if(knownMediaPage&&!verifiedFormats[0]){
+   TextView hint=text("Checking video formats… Exact resolutions appear after verification.",12,GRAY);
+   hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
+  }
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
   web.evaluateJavascript(embeddedMediaScript(),raw->{
@@ -1375,9 +1383,26 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     JSONObject c=candidates.optJSONObject(i);if(c==null)continue;
     String link=c.optString("url"),label=c.optString("label","Player");
     if(link.isEmpty()||link.equals(initialUrl))continue;
-    settingRow(options,"▶  "+label,"Use the embedded player URL for format detection",()->{
+    settingRow(options,"▶  "+label,"Open this player's video and audio format choices",()->{
      dialog.dismiss();showMediaDownloadPanel(link,web);
     });
+    if(i<2&&!verifiedFormats[0]){
+     embeddedSearching[0]=true;
+     inspectFormatsCached(link,new MediaFormatListener(){
+      @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
+       if(!dialog.isShowing()||verifiedFormats[0])return;
+       verifiedFormats[0]=true;
+       state.setText("Detected embedded video: "+mediaTitle+" • Choose a resolution or audio format.");
+       quickOptions.removeAllViews();
+       addFormatChoices(quickOptions,link,choices,dialog);
+      }
+      @Override public void failed(String error){
+       if(!dialog.isShowing()||verifiedFormats[0])return;
+       lastFormatError[0]=error;
+       state.setText("Embedded player detected. Could not verify its formats yet. Try playing the video, then tap the player or a detected stream.");
+      }
+     });
+    }
    }
   });
   // Start lookup immediately using the current permalink; DOM scanning is independent.
@@ -1385,14 +1410,18 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   inspectFormatsCached(initialUrl,new MediaFormatListener(){
    @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
     if(!dialog.isShowing())return;
-    state.setText("Available formats for: "+mediaTitle);
+    if(verifiedFormats[0]&&!mediaFormatCache.containsKey(initialUrl))return;
+    verifiedFormats[0]=true;
+    state.setText("Available video and audio formats for: "+mediaTitle);
     quickOptions.removeAllViews();
     addFormatChoices(quickOptions,initialUrl,choices,dialog);
    }
    @Override public void failed(String error){
     if(!dialog.isShowing())return;
-    state.setText("No supported stream found for this page URL. Play the video, then use a detected stream or embedded player. Details: "+error);
-    settingRow(options,"↻  Retry format detection","Check available video/audio formats again",()->{
+    if(verifiedFormats[0])return;
+    lastFormatError[0]=error;
+    state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Play the video if needed.":"No formats found for the page URL. Checking embedded players and detected streams…");
+    settingRow(options,"↻  Retry format detection","Recheck the current video and its embedded player",()->{
      mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
      dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
     });
@@ -1405,6 +1434,28 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if(direct.length()>0){
     mergeDirectMedia(initialUrl,direct);
     showDirectChoices(directOptions,directMediaCache.get(initialUrl),dialog);
+    if(!verifiedFormats[0]){
+     for(int i=0;i<direct.length();i++){
+      JSONObject media=direct.optJSONObject(i);
+      if(media==null||!"HLS".equals(media.optString("kind")))continue;
+      String playlist=media.optString("url");
+      if(playlist.isEmpty())continue;
+      inspectFormatsCached(playlist,new MediaFormatListener(){
+       @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
+        if(!dialog.isShowing()||verifiedFormats[0])return;
+        verifiedFormats[0]=true;
+        state.setText("Detected stream: "+mediaTitle+" • Select an available resolution or audio format.");
+        quickOptions.removeAllViews();
+        addFormatChoices(quickOptions,playlist,choices,dialog);
+       }
+       @Override public void failed(String error){
+        if(!dialog.isShowing()||verifiedFormats[0])return;
+        state.setText("Direct stream detected. Use the direct source below; individual resolutions were not exposed by this player.");
+       }
+      });
+      break;
+     }
+    }
    }
   });
  }
@@ -1537,7 +1588,10 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void downloadMediaFile(String mediaUrl,MediaDownloadEngine.Choice choice){
   try{
-   MediaDownloadService.enqueue(getApplicationContext(),mediaUrl,choice);
+   String title=mediaTitleCache.getOrDefault(mediaUrl,"");
+   if(title.isEmpty()||title.equalsIgnoreCase("Available formats"))title=mediaTitleForDownload(tabs.isEmpty()?null:active().getUrl());
+   WebView w=tabs.isEmpty()?null:active();
+   MediaDownloadService.enqueue(getApplicationContext(),mediaUrl,choice,w==null?"":w.getUrl(),w==null?null:w.getSettings().getUserAgentString(),title);
    Toast.makeText(this,"Download started. Track progress in Downloads or Android notifications.",Toast.LENGTH_LONG).show();
    if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
     requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},302);
