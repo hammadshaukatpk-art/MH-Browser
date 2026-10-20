@@ -1061,7 +1061,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  boolean isNetworkMediaUrl(Uri u){
   if(u==null)return false;
   String path=u.getPath();if(path==null)return false;
-  return path.toLowerCase(Locale.ROOT).matches(".*\\\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd)$");
+  return path.toLowerCase(Locale.ROOT).matches(".*\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd)$");
  }
  void noteNetworkMedia(WebView v,Uri media){
   if(tabs.isEmpty()||v!=active()||media==null)return;
@@ -1075,7 +1075,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   mediaAvailable=true;updateMediaOverlay();
   String path=media.getPath()==null?"":media.getPath().toLowerCase(Locale.ROOT);
   if(path.endsWith(".m3u8")||path.endsWith(".mpd"))return; // adaptive streams need extraction/DRM checks
-  String kind=path.matches(".*\\\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
+  String kind=path.matches(".*\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
   JSONArray direct=directMediaCache.get(page);
   if(direct==null){direct=new JSONArray();directMediaCache.put(page,direct);}
   if(direct.length()>=12)return;
