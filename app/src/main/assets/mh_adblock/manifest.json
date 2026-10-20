@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "MH Browser Ad Protection (Preview)",
+  "version": "0.1.0",
+  "description": "Prototype network and cosmetic ad protection for GeckoView.",
+  "applications": {"gecko": {"id": "mh-adblock@mh-browser"}},
+  "permissions": ["webRequest", "webRequestBlocking", "<all_urls>", "storage"],
+  "background": {"scripts": ["background.js"]},
+  "content_scripts": [{"matches": ["<all_urls>"], "js": ["cosmetic.js"], "run_at": "document_start", "all_frames": true}]
+}
