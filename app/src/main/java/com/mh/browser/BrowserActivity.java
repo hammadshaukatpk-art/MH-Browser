@@ -29,7 +29,7 @@ public class BrowserActivity extends Activity {
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
- createTab(false);String saved=prefs.getString("lastUrl","");if(!saved.isEmpty())navigate(saved);showSplash();}
+ createTab(false);String saved=prefs.getBoolean("restore",true)?prefs.getString("lastUrl",""):"";if(!saved.isEmpty())navigate(saved);showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -53,7 +53,7 @@ public class BrowserActivity extends Activity {
 
  WebView active(){return tabs.get(index).web;}
  String url(String s){s=s.trim();if(s.isEmpty())return "about:blank";if(s.startsWith("https://")||s.startsWith("http://")||s.equals("about:blank"))return s;if(s.contains(".")&&!s.contains(" "))return "https://"+s;return "https://www.google.com/search?q="+Uri.encode(s);}
- void navigate(String target){String dest=url(target);if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();if(dest.equals("about:blank")){active().loadUrl(dest);display();}else{body.removeAllViews();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));w.loadUrl(dest);}}
+ void navigate(String target){String dest=url(target);if(!tabs.get(index).incognito&&!dest.equals("about:blank"))prefs.edit().putString("lastUrl",dest).apply();if(dest.equals("about:blank")){active().loadUrl(dest);display();}else{body.removeAllViews();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));w.loadUrl(dest);display();}}
 
  void header(){
   head.setBackgroundColor(BG);
@@ -71,10 +71,10 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(46),dp(48)));
  }
 
- void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(true);s.setBuiltInZoomControls(true);s.setDisplayZoomControls(false);s.setSupportMultipleWindows(false);if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false))s.setUserAgentString(s.getUserAgentString().replace("Mobile","").replace("Android","X11; Linux x86_64"));if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setWebChromeClient(new WebChromeClient(){@Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb){cb.invoke(origin,false,false);}});
- w.setWebViewClient(new WebViewClient(){@Override public void onPageFinished(WebView v,String u){if(v==active()&&address!=null)address.setText(u.equals("about:blank")?"":u);if(!tabs.get(index).incognito&&u.startsWith("http"))addHistory(u);}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
+ w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&address!=null)address.setText(u.equals("about:blank")?"":u);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
  void display(){showingSettings=false;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
@@ -121,22 +121,24 @@ public class BrowserActivity extends Activity {
   LinearLayout section=row();LinearLayout.LayoutParams sec=new LinearLayout.LayoutParams(-1,-2);sec.topMargin=dp(26);c.addView(section,sec);
   TextView shortcuts=text("Quick access",18,WHITE);shortcuts.setTypeface(null,Typeface.BOLD);section.addView(shortcuts,new LinearLayout.LayoutParams(0,-2,1));
   TextView edit=text("EDIT",12,0xff62caff);section.addView(edit);edit.setOnClickListener(v->editShortcuts());
-  String[] labels={"Google","YouTube","Amazon","eBay","AliExpress","Facebook","X","Add"};
-  String[] symbols={"G","▶","a","e","A","f","𝕏","+"};
-  int[] colors={0xff4285f4,0xffed2939,0xffff9c24,0xff3285dd,0xfffa6948,0xff2465d1,0xff18273d,0xff183954};
-  String[] links={"https://www.google.com","https://www.youtube.com","https://www.amazon.com","https://www.ebay.com","https://www.aliexpress.com","https://www.facebook.com","https://x.com","about:blank"};
-  for(int rowIndex=0;rowIndex<2;rowIndex++){
+  JSONArray links=shortcuts();int count=links.length()+1;
+  for(int start=0;start<count;start+=4){
     LinearLayout line=row();line.setGravity(Gravity.CENTER);
-    LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,-2);llp.topMargin=dp(18);c.addView(line,llp);
+    LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,-2);llp.topMargin=dp(14);c.addView(line,llp);
     for(int j=0;j<4;j++){
-      final int n=rowIndex*4+j;LinearLayout item=column();item.setGravity(Gravity.CENTER);
-      line.addView(item,new LinearLayout.LayoutParams(0,dp(86),1));
-      TextView circle=text(symbols[n],n==1?21:23,WHITE);circle.setTypeface(null,Typeface.BOLD);circle.setGravity(Gravity.CENTER);
-      circle.setBackground(grad(colors[n],colors[n]==0xff183954?0xff26507c:colors[n],20));
-      item.addView(circle,new LinearLayout.LayoutParams(dp(47),dp(47)));
-      TextView lab=text(labels[n],11,0xffd7e7fb);lab.setGravity(Gravity.CENTER);
-      LinearLayout.LayoutParams la=new LinearLayout.LayoutParams(-1,dp(30));item.addView(lab,la);
-      item.setOnClickListener(v->{if(n==7)createTab(false);else navigate(links[n]);});
+      int n=start+j;if(n>=count){TextView empty=text("",11,WHITE);line.addView(empty,new LinearLayout.LayoutParams(0,dp(84),1));continue;}
+      JSONObject obj=n<links.length()?links.optJSONObject(n):null;
+      String label=obj==null?"Add":obj.optString("name","Site");
+      String target=obj==null?"":obj.optString("url","");
+      LinearLayout item=column();item.setGravity(Gravity.CENTER);line.addView(item,new LinearLayout.LayoutParams(0,dp(84),1));
+      TextView circle=text(obj==null?"+":label.substring(0,Math.min(1,label.length())).toUpperCase(),22,WHITE);
+      circle.setTypeface(null,Typeface.BOLD);circle.setGravity(Gravity.CENTER);
+      int color=obj==null?0xff21547d:new int[]{0xff4285f4,0xffd73a4b,0xffe9962e,0xff2777ba,0xffe66d43,0xff386dc8,0xff2c4569}[n%7];
+      circle.setBackground(grad(color,color,20));item.addView(circle,new LinearLayout.LayoutParams(dp(47),dp(47)));
+      TextView lab=text(label,11,0xffd7e7fb);lab.setGravity(Gravity.CENTER);lab.setSingleLine(true);
+      lab.setEllipsize(android.text.TextUtils.TruncateAt.END);item.addView(lab,new LinearLayout.LayoutParams(-1,dp(29)));
+      item.setOnClickListener(v->{if(obj==null)shortcutForm(-1);else navigate(target);});
+      item.setOnLongClickListener(v->{if(obj!=null)shortcutOptions(n);return true;});
     }
   }
   LinearLayout hero=column();hero.setPadding(dp(20),dp(20),dp(20),dp(20));
@@ -183,6 +185,95 @@ public class BrowserActivity extends Activity {
  void dialog(String title,String message){themed().setTitle(title).setMessage(message).setPositiveButton("OK",null).show();}
  void settingRow(LinearLayout list,String label,String desc,Runnable act){LinearLayout c=column();c.setPadding(20,16,20,16);c.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(c,lp);c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));c.setOnClickListener(v->act.run());}
  void switchRow(LinearLayout list,String label,String desc,String pref,boolean def){LinearLayout r=row();r.setPadding(20,12,12,12);r.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(r,lp);LinearLayout c=column();r.addView(c,new LinearLayout.LayoutParams(0,-2,1));c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));Switch s=new Switch(this);s.setChecked(prefs.getBoolean(pref,def));r.addView(s);s.setOnCheckedChangeListener((b,v)->prefs.edit().putBoolean(pref,v).apply());}
+
+
+ JSONArray readArray(String key){try{return new JSONArray(prefs.getString(key,"[]"));}catch(Exception e){return new JSONArray();}}
+ void storeArray(String key,JSONArray a){prefs.edit().putString(key,a.toString()).apply();}
+ JSONArray shortcuts(){
+  String saved=prefs.getString("shortcuts",null);if(saved!=null){try{return new JSONArray(saved);}catch(Exception ignored){}}
+  JSONArray a=new JSONArray();String[][] d={{"Google","https://www.google.com"},{"YouTube","https://www.youtube.com"},{"Amazon","https://www.amazon.com"},{"eBay","https://www.ebay.com"},{"AliExpress","https://www.aliexpress.com"},{"Facebook","https://www.facebook.com"},{"X","https://x.com"}};
+  for(String[] item:d){JSONObject o=new JSONObject();try{o.put("name",item[0]);o.put("url",item[1]);a.put(o);}catch(Exception ignored){}}return a;
+ }
+ void editShortcuts(){
+  JSONArray a=shortcuts();String[] names=new String[a.length()+1];
+  for(int i=0;i<a.length();i++)names[i]=a.optJSONObject(i).optString("name","Shortcut");
+  names[a.length()]="+ Add shortcut";
+  themed().setTitle("Edit quick access").setItems(names,(d,n)->{
+   if(n==a.length())shortcutForm(-1);else shortcutOptions(n);
+  }).setNegativeButton("Done",null).show();
+ }
+ void shortcutOptions(int n){themed().setTitle(shortcuts().optJSONObject(n).optString("name"))
+  .setItems(new String[]{"Edit shortcut","Remove shortcut"},(d,i)->{
+   if(i==0)shortcutForm(n);else{JSONArray a=shortcuts(),b=new JSONArray();for(int k=0;k<a.length();k++)if(k!=n)b.put(a.opt(k));storeArray("shortcuts",b);display();}
+  }).setNegativeButton("Cancel",null).show();}
+ void shortcutForm(int position){
+  JSONObject old=position<0?null:shortcuts().optJSONObject(position);
+  LinearLayout c=column();c.setPadding(dp(22),dp(10),dp(22),dp(6));
+  EditText name=new EditText(this),link=new EditText(this);
+  name.setSingleLine(true);name.setHint("Shortcut name");name.setTextColor(WHITE);
+  link.setSingleLine(true);link.setHint("https://example.com");link.setTextColor(WHITE);link.setInputType(17);
+  if(old!=null){name.setText(old.optString("name"));link.setText(old.optString("url"));}
+  c.addView(name);c.addView(link);
+  AlertDialog d=themed().setTitle(position<0?"Add shortcut":"Edit shortcut").setView(c).setNegativeButton("Cancel",null)
+   .setPositiveButton("Save",null).create();
+  d.setOnShowListener(v->d.getButton(-1).setOnClickListener(w->{
+   String nm=name.getText().toString().trim(),u=link.getText().toString().trim();
+   if(nm.isEmpty()){name.setError("Enter a name");return;}
+   if(!u.startsWith("https://")&&!u.startsWith("http://")){link.setError("Enter an HTTP or HTTPS URL");return;}
+   Uri parsed=Uri.parse(u);if(parsed.getHost()==null){link.setError("Invalid URL");return;}
+   try{JSONArray a=shortcuts();JSONObject o=new JSONObject();o.put("name",nm);o.put("url",u);
+    if(position<0)a.put(o);else a.put(position,o);storeArray("shortcuts",a);d.dismiss();display();
+   }catch(Exception e){link.setError("Could not save shortcut");}
+  }));d.show();
+ }
+ void addHistory(String u){
+  if(u==null||!u.startsWith("http"))return;JSONArray old=readArray("history"),a=new JSONArray();a.put(u);
+  for(int i=0;i<old.length()&&a.length()<100;i++){String v=old.optString(i);if(!u.equals(v))a.put(v);}storeArray("history",a);
+ }
+ void bookmarks(){
+  String current=active().getUrl();JSONArray a=readArray("bookmarks");
+  ArrayList<String> names=new ArrayList<>();names.add("+ Bookmark current page");for(int i=0;i<a.length();i++)names.add(a.optString(i));
+  themed().setTitle("Bookmarks").setItems(names.toArray(new String[0]),(d,n)->{
+   if(n==0){if(current!=null&&current.startsWith("http")){boolean exists=false;for(int i=0;i<a.length();i++)if(current.equals(a.optString(i)))exists=true;
+     if(!exists){a.put(current);storeArray("bookmarks",a);}dialog("Saved","Page added to bookmarks.");}
+     else dialog("Bookmarks","Open a website before bookmarking.");}
+   else navigate(a.optString(n-1));
+  }).setNegativeButton("Close",null).show();
+ }
+ void history(){
+  JSONArray a=readArray("history");String[] names=new String[a.length()];for(int i=0;i<a.length();i++)names[i]=a.optString(i);
+  themed().setTitle("History").setItems(names,(d,n)->navigate(a.optString(n))).setNeutralButton("Clear",(d,n)->{storeArray("history",new JSONArray());}).setNegativeButton("Close",null).show();
+ }
+ void network(){
+  String type="Not connected";
+  try{ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+   android.net.Network net=cm.getActiveNetwork();NetworkCapabilities caps=cm.getNetworkCapabilities(net);
+   if(caps!=null)type=caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)?"Wi-Fi":caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)?"Mobile data":"Other network";
+  }catch(Exception ignored){}
+  dialog("Network information","Connection: "+type+"\nPublic IP and IP-based city cannot be reliably determined offline. Device GPS location and network IP location are different.");
+ }
+ void downloads(){dialog("Downloads","Direct file downloads use Android Download Manager. Downloads from streaming/DRM websites or video quality selection are not generally available.");}
+ void general(){
+  head.removeAllViews();body.removeAllViews();sectionHeader("General",this::settings);
+  LinearLayout l=settingContent();
+  settingRow(l,"Search engine","Google Search",()->dialog("Search engine","Google Search is selected for V1.0."));
+  switchRow(l,"Restore last page","Reopen the last normal URL on launch","restore",true);
+  switchRow(l,"Enable JavaScript","Required for many websites","javascript",true);
+  switchRow(l,"Load images","Show images on websites","images",true);
+  switchRow(l,"Desktop mode by default","Request desktop user agent for new tabs","desktop",false);
+  settingRow(l,"Home page","MH Browser start page",()->dialog("Home page","MH Browser start page is the default home page."));
+ }
+ void advanced(){
+  head.removeAllViews();body.removeAllViews();sectionHeader("Advanced",this::settings);
+  LinearLayout l=settingContent();
+  switchRow(l,"Enable zoom","Pinch to zoom on websites","zoom",true);
+  switchRow(l,"Allow third-party cookies","Control is in Privacy & Security","dummy",false);
+  settingRow(l,"Network diagnostics","View active connection type",this::network);
+  settingRow(l,"Clear history","Remove saved visited-page list",()->themed().setTitle("Clear history?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->storeArray("history",new JSONArray())).show());
+  settingRow(l,"Browser engine","Android System WebView",()->dialog("Browser engine","MH Browser uses the installed Android System WebView, which is Chromium-based."));
+ }
+ void sectionHeader(String label,Runnable back){LinearLayout r=row();r.setPadding(dp(10),dp(10),dp(12),dp(10));head.addView(r);r.addView(action("‹",28,back),new LinearLayout.LayoutParams(dp(48),dp(45)));TextView t=text(label,22,WHITE);t.setTypeface(null,Typeface.BOLD);r.addView(t);}
+ LinearLayout settingContent(){ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout l=column();l.setPadding(dp(15),dp(10),dp(15),dp(20));sc.addView(l);return l;}
 
  void settings(){
   head.removeAllViews();body.removeAllViews();
