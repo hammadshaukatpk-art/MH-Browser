@@ -248,7 +248,7 @@ public class BrowserActivity extends Activity {
      Intent app=Intent.parseUri(target.toString(),Intent.URI_INTENT_SCHEME);
      app.addCategory(Intent.CATEGORY_BROWSABLE);
      app.setComponent(null);app.setSelector(null);
-     startActivity(app);return true;
+     try{startActivity(app);return true;}catch(android.content.ActivityNotFoundException noHandler){/* use safe web fallback */}
      String fallback=app.getStringExtra("browser_fallback_url");
      if(fallback!=null&&(fallback.startsWith("https://")||fallback.startsWith("http://"))){view.loadUrl(fallback);return true;}
     }catch(Exception ignored){}
