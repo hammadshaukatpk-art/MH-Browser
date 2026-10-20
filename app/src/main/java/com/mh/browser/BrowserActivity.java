@@ -139,7 +139,7 @@ public class BrowserActivity extends Activity {
  LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(0);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
  TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
- @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);MediaEngineUpdater.check(getApplicationContext());CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
+ @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);AdBlockRules.initialize(getApplicationContext());MediaEngineUpdater.check(getApplicationContext());CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
  if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
   String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
@@ -297,8 +297,10 @@ public class BrowserActivity extends Activity {
    Integer last=mediaInjectionStages.get(view);
    if(last!=null&&last>=stage)return;
    mediaInjectionStages.put(view,stage);
-   if(view.getUrl()!=null&&view.getUrl().startsWith("http"))
+   if(view.getUrl()!=null&&view.getUrl().startsWith("http")){
     view.evaluateJavascript(mediaObserverScript(),null);
+    applyAdCosmetics(view);
+   }
   }
   @Override public void onHideCustomView(){hideVideo();}
   @Override public boolean onJsAlert(WebView view,String url,String message,JsResult result){
@@ -410,7 +412,7 @@ public class BrowserActivity extends Activity {
     if(recovery==null||SystemClock.elapsedRealtime()-recovery>5000)lastWorkingPage.put(v,u);
    }
    refreshTabTitle(v);
- v.evaluateJavascript(mediaObserverScript(),null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
+ v.evaluateJavascript(mediaObserverScript(),null);applyAdCosmetics(v);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
    if(AdBlockRules.shouldBlock(req,prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
     return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
    if(!req.isForMainFrame()&&isNetworkMediaUrl(req.getUrl()))
@@ -799,6 +801,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if("zoom".equals(pref)){ws.setSupportZoom(v);ws.setBuiltInZoomControls(v);}
    if("popups".equals(pref))ws.setJavaScriptCanOpenWindowsAutomatically(v);
    if("blockCookies".equals(pref))CookieManager.getInstance().setAcceptThirdPartyCookies(t.web,!v&&!t.incognito);
+   if("adBlocker".equals(pref))applyAdCosmetics(t.web);
   }
   if("location".equals(pref)&&v&&checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
    requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,android.Manifest.permission.ACCESS_COARSE_LOCATION},201);
@@ -1039,6 +1042,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  // Detect media on dynamically rendered pages, SPA routes and supported embeds.
  // A media element's presence triggers the button; the download engine separately
  // determines whether the site provides an accessible, non-DRM source.
+ void applyAdCosmetics(WebView w){
+  if(w==null||w.getUrl()==null||!w.getUrl().startsWith("http"))return;
+  w.evaluateJavascript("window.MHAdBlockEnabled="+(prefs.getBoolean("adBlocker",true)?"true":"false")+";",null);
+  w.evaluateJavascript(AdBlockRules.cosmeticScript(),null);
+ }
  String mediaObserverScript(){
   return "(function(){"+
    "if(!document.documentElement||!window.MHMedia)return;"+
