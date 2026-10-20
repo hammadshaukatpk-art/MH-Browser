@@ -484,12 +484,12 @@ public class BrowserActivity extends Activity {
   };ad.addView(art,new FrameLayout.LayoutParams(-1,-1));
   LinearLayout hero=column();hero.setPadding(dp(19),dp(15),dp(15),dp(12));ad.addView(hero,new FrameLayout.LayoutParams(-1,-1));
   TextView tag=text("ADVERTISING SPACE",11,0xff8feaff);tag.setTypeface(null,Typeface.BOLD);hero.addView(tag);
-  TextView htitle=text("Advertise with MH",23,WHITE);htitle.setTypeface(null,Typeface.BOLD);
+  TextView htitle=text("Advertising - MH Browser",21,WHITE);htitle.setTypeface(null,Typeface.BOLD);
   LinearLayout.LayoutParams ht=new LinearLayout.LayoutParams(-1,-2);ht.topMargin=dp(11);hero.addView(htitle,ht);
   hero.addView(text("For Advertising, Contact with Us",13,0xffd5e8fa));
   TextView go=text("Contact with Us  →",14,0xff9beaff);go.setTypeface(null,Typeface.BOLD);
   LinearLayout.LayoutParams gp=new LinearLayout.LayoutParams(-1,-2);gp.topMargin=dp(17);hero.addView(go,gp);
-  ad.setOnClickListener(v->dialog("Advertise with MH","Advertising contact details will be available soon."));
+  ad.setOnClickListener(v->showAdvertisingContact());
   LinearLayout footer=row();footer.setGravity(Gravity.CENTER);
   LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,-2);fp.topMargin=dp(28);c.addView(footer,fp);
   TextView priv=text("◉  Privacy controls",13,0xffa5c8f2);footer.addView(priv,new LinearLayout.LayoutParams(0,-2,1));
@@ -498,6 +498,72 @@ public class BrowserActivity extends Activity {
  }
 
 
+ // Advertising contact panel follows the same themed dialogs as other app actions.
+ void showAdvertisingContact(){
+  LinearLayout panel=column();
+  panel.setPadding(dp(20),dp(22),dp(20),dp(9));
+  panel.setGravity(Gravity.CENTER_HORIZONTAL);
+  TextView heading=text("Advertising - MH Browser",21,WHITE);
+  heading.setTypeface(null,Typeface.BOLD);heading.setGravity(Gravity.CENTER);
+  panel.addView(heading,new LinearLayout.LayoutParams(-1,-2));
+  TextView subtitle=text("Team Support",13,0xff92dcff);
+  subtitle.setGravity(Gravity.CENTER);
+  LinearLayout.LayoutParams sub=new LinearLayout.LayoutParams(-1,-2);
+  sub.topMargin=dp(8);panel.addView(subtitle,sub);
+  View separator=new View(this);separator.setBackgroundColor(0x445a96c2);
+  LinearLayout.LayoutParams sep=new LinearLayout.LayoutParams(-1,dp(1));
+  sep.topMargin=dp(20);sep.bottomMargin=dp(18);panel.addView(separator,sep);
+  addAdvertisingContact(panel,"Hannad","+92 343 4824609","923434824609");
+  addAdvertisingContact(panel,"Masoom","+92 341 4928858","923414928858");
+  TextView thanks=text("Thanks for your support.",13,0xffaec7de);
+  thanks.setGravity(Gravity.CENTER);
+  LinearLayout.LayoutParams foot=new LinearLayout.LayoutParams(-1,-2);
+  foot.topMargin=dp(12);foot.bottomMargin=dp(10);panel.addView(thanks,foot);
+  AlertDialog dialog=themed().setView(panel).setPositiveButton("Close",null).create();
+  dialog.show();styleDialog(dialog);
+ }
+ void addAdvertisingContact(LinearLayout panel,String name,String number,String digits){
+  LinearLayout card=row();
+  card.setPadding(dp(13),dp(12),dp(12),dp(12));
+  card.setBackground(grad(0xff1a405b,0xff123047,14));
+  LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+  cp.bottomMargin=dp(11);panel.addView(card,cp);
+  // WhatsApp-style green speech bubble and phone symbol, drawn locally.
+  View icon=new View(this){
+   android.graphics.Paint p=new android.graphics.Paint(3);
+   @Override protected void onDraw(android.graphics.Canvas c){
+    super.onDraw(c);
+    float cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(getWidth(),getHeight())*.46f;
+    p.setColor(0xff25d366);p.setStyle(android.graphics.Paint.Style.FILL);
+    c.drawCircle(cx,cy,r,p);
+    android.graphics.Path tail=new android.graphics.Path();
+    tail.moveTo(cx-r*.73f,cy+r*.49f);
+    tail.lineTo(cx-r*.93f,cy+r*.95f);
+    tail.lineTo(cx-r*.30f,cy+r*.77f);tail.close();c.drawPath(tail,p);
+    p.setColor(Color.WHITE);p.setStyle(android.graphics.Paint.Style.STROKE);
+    p.setStrokeWidth(dp(2.7f));p.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+    android.graphics.RectF arc=new android.graphics.RectF(cx-r*.56f,cy-r*.57f,cx+r*.55f,cy+r*.56f);
+    c.drawArc(arc,130,275,false,p);
+    p.setStrokeWidth(dp(3.3f));
+    c.drawLine(cx-r*.37f,cy-r*.29f,cx-r*.13f,cy-r*.05f,p);
+    c.drawLine(cx+r*.13f,cy+r*.12f,cx+r*.37f,cy+r*.28f,p);
+    p.setStyle(android.graphics.Paint.Style.FILL);
+   }
+  };
+  card.addView(icon,new LinearLayout.LayoutParams(dp(43),dp(43)));
+  LinearLayout info=column();info.setPadding(dp(13),0,0,0);
+  card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+  TextView contact=text(name,16,WHITE);contact.setTypeface(null,Typeface.BOLD);info.addView(contact);
+  TextView phone=text(number+"  •  WhatsApp",12,0xffa5d9ed);
+  LinearLayout.LayoutParams pl=new LinearLayout.LayoutParams(-1,-2);pl.topMargin=dp(3);info.addView(phone,pl);
+  TextView arrow=text("›",24,0xff6fe7ae);arrow.setGravity(Gravity.CENTER);
+  card.addView(arrow,new LinearLayout.LayoutParams(dp(23),dp(43)));
+  card.setContentDescription("WhatsApp "+name+" "+number);
+  card.setOnClickListener(v->{
+   try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://wa.me/"+digits)));}
+   catch(Exception e){Toast.makeText(this,"Unable to open WhatsApp link",Toast.LENGTH_SHORT).show();}
+  });
+ }
  void loadShortcutIcon(ImageView image,String target){
   Uri parsed=Uri.parse(target);String host=parsed.getHost();
   if(host==null||host.isEmpty())return;
