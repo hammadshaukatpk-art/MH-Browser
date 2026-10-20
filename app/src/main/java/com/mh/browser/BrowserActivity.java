@@ -35,6 +35,7 @@ public class BrowserActivity extends Activity {
  final LruCache<String,Bitmap> shortcutIconCache=new LruCache<>(24);
  final Map<String,java.util.List<MediaDownloadEngine.Choice>> mediaFormatCache=new HashMap<>();
  final Map<String,String> mediaTitleCache=new HashMap<>();
+ final Map<String,String> pageMovieTitleCache=new HashMap<>();
  final Map<String,JSONArray> directMediaCache=new HashMap<>();
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
  final Map<WebView,Integer> mediaInjectionStages=new java.util.WeakHashMap<>();
@@ -477,6 +478,7 @@ public class BrowserActivity extends Activity {
     if(recovery==null||SystemClock.elapsedRealtime()-recovery>5000)lastWorkingPage.put(v,u);
    }
    refreshTabTitle(v);
+   if(v==active()&&u!=null&&u.startsWith("http"))capturePageMovieTitle(v,u,null);
  v.evaluateJavascript(mediaObserverScript(),null);v.evaluateJavascript(mediaProbeScript(),null);applyAdCosmetics(v);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
    if(AdBlockRules.shouldBlock(req,pageForFiltering.get(v),prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
     return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
@@ -1326,12 +1328,37 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    updateMediaOverlay();
   });
  }
+ String pageMovieTitleScript(){
+  return "(function(){try{"+
+   "var title='';"+
+   "var headings=document.querySelectorAll('main h1,article h1,h1,[class*=movie-title],[class*=film-title],[class*=video-title]');"+
+   "for(var i=0;i<headings.length&&i<12;i++){var h=headings[i];var t=(h.innerText||h.textContent||'').trim();"+
+   "if(t.length>1&&t.length<150&&h.getClientRects().length&& !/^(movies|series|home|search|watch|login|menu)$/i.test(t)){title=t;break;}}"+
+   "if(!title){var m=document.querySelector('meta[property=\\\"og:title\\\"]');if(m)title=m.content||'';}"+
+   "if(!title)title=document.title||'';"+
+   "return title.slice(0,180);}catch(e){return document.title||'';}})()";
+ }
+ void capturePageMovieTitle(WebView web,String page,Runnable ready){
+  if(web==null||page==null||!page.startsWith("http")){if(ready!=null)ready.run();return;}
+  web.evaluateJavascript(pageMovieTitleScript(),raw->{
+   if(page.equals(web.getUrl())){
+    try{
+     String title=new JSONArray("["+raw+"]").optString(0,"").trim();
+     if(!title.isEmpty()&&!title.matches("(?i)^(Video|Watch|Home|Player|Movies|Series|SomiFlix|YouTube|Facebook|Instagram)$"))
+      pageMovieTitleCache.put(page,title);
+    }catch(Exception ignored){}
+   }
+   if(ready!=null)ready.run();
+  });
+ }
  void mediaDownloads(){
   if(tabs.isEmpty())return;
   WebView web=active();String initialUrl=web.getUrl();
   if(initialUrl==null||!initialUrl.startsWith("http"))return;
-  // Show the organized download form immediately; format inspection never blocks opening it.
-  showMediaDownloadPanel(initialUrl,web);
+  // Resolve the visible movie heading first, not the iframe's generic player title.
+  capturePageMovieTitle(web,initialUrl,()->{
+   if(!isFinishing()&&!isDestroyed()&&web==active())showMediaDownloadPanel(initialUrl,web);
+  });
  }
  void showMediaDownloadPanel(String initialUrl,WebView web){
   ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);
@@ -1343,6 +1370,10 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinearLayout words=column();words.setPadding(dp(12),0,0,0);heading.addView(words,new LinearLayout.LayoutParams(0,-2,1));
   TextView title=text("Media Downloader",20,WHITE);title.setTypeface(null,Typeface.BOLD);words.addView(title);
   words.addView(text("Video quality  •  Audio formats",12,GRAY));
+  TextView movieName=text("Source title: "+mediaTitleForDownload(web.getUrl()),13,WHITE);
+  movieName.setTypeface(null,Typeface.BOLD);
+  movieName.setPadding(dp(12),dp(6),dp(12),dp(8));
+  layout.addView(movieName);
   TextView state=text("Choose a format below to download.",13,0xffa7c7e4);
   state.setPadding(dp(12),dp(12),dp(12),dp(12));
   state.setBackground(grad(0xff1b3a57,0xff112943,12));layout.addView(state);
@@ -1479,7 +1510,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  String mediaTitleForDownload(String pageUrl){
   String title="";
-  if(pageUrl!=null&&pageUrl.equals(detectedMediaPage))title=detectedMediaTitle;
+  // The parent movie page heading takes precedence over embedded-player metadata.
+  String parentPage=tabs.isEmpty()?null:active().getUrl();
+  if(parentPage!=null)title=pageMovieTitleCache.getOrDefault(parentPage,"");
+  if(title.isEmpty()&&pageUrl!=null)title=pageMovieTitleCache.getOrDefault(pageUrl,"");
+  if(title.isEmpty()&&pageUrl!=null&&pageUrl.equals(detectedMediaPage))title=detectedMediaTitle;
   if(title.matches("(?i)^(Video|Watch|Home|Player|Embedded Player|YouTube|Facebook|Instagram|TikTok)$"))title="";
   if(title.isEmpty()&&pageUrl!=null)title=mediaTitleCache.getOrDefault(pageUrl,"");
   if(title.matches("(?i)^(Available formats|Video|Watch|Home|Player)$"))title="";
@@ -1649,8 +1684,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void downloadMediaFile(String mediaUrl,MediaDownloadEngine.Choice choice){
   try{
-   String title=mediaTitleCache.getOrDefault(mediaUrl,"");
-   if(title.isEmpty()||title.equalsIgnoreCase("Available formats"))title=mediaTitleForDownload(tabs.isEmpty()?null:active().getUrl());
+   String title=mediaTitleForDownload(tabs.isEmpty()?null:active().getUrl());
+   if(title.isEmpty())title=mediaTitleCache.getOrDefault(mediaUrl,"");
    WebView w=tabs.isEmpty()?null:active();
    MediaDownloadService.enqueue(getApplicationContext(),mediaUrl,choice,w==null?"":w.getUrl(),w==null?null:w.getSettings().getUserAgentString(),title);
    Toast.makeText(this,"Download started. Track progress in Downloads or Android notifications.",Toast.LENGTH_LONG).show();
