@@ -513,7 +513,7 @@ public class BrowserActivity extends Activity {
   View separator=new View(this);separator.setBackgroundColor(0x445a96c2);
   LinearLayout.LayoutParams sep=new LinearLayout.LayoutParams(-1,dp(1));
   sep.topMargin=dp(20);sep.bottomMargin=dp(18);panel.addView(separator,sep);
-  addAdvertisingContact(panel,"Hannad","+92 343 4824609","923434824609");
+  addAdvertisingContact(panel,"Hammad","+92 343 4824609","923434824609");
   addAdvertisingContact(panel,"Masoom","+92 341 4928858","923414928858");
   TextView thanks=text("Thanks for your support.",13,0xffaec7de);
   thanks.setGravity(Gravity.CENTER);
