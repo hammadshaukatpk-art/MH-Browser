@@ -815,7 +815,7 @@ public class BrowserActivity extends Activity {
  void applyVideoOrientation(){
   if(fullscreenVideo==null)return;
   boolean portrait=videoWidth>0&&videoHeight>0?videoWidth<=videoHeight:isVerticalMediaPage(tabs.isEmpty()?"":active().getUrl());
-  if(videoWidth<=0&&!portrait)return; // Wait for real media dimensions on ordinary pages.
+  // Standard players default to landscape while their metadata loads; known shorts stay portrait.
   int desired=portrait?android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
   if(getRequestedOrientation()!=desired)setRequestedOrientation(desired);
  }
@@ -1320,6 +1320,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void showMediaDownloadPanel(String initialUrl,WebView web){
   ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);
+  scroll.setVerticalScrollBarEnabled(true);
   LinearLayout layout=column();layout.setPadding(dp(16),dp(8),dp(16),dp(14));scroll.addView(layout);
   LinearLayout heading=row();heading.setPadding(dp(8),dp(5),dp(8),dp(9));layout.addView(heading);
   TextView symbol=text("↓",30,0xff74d8ff);symbol.setGravity(Gravity.CENTER);
@@ -1350,16 +1351,19 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if(activeMediaDialog==dialog){activeMediaDialog=null;activeDirectMediaOptions=null;activeMediaPage=null;}
   });
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
-   dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),WindowManager.LayoutParams.WRAP_CONTENT);}
+   dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),WindowManager.LayoutParams.WRAP_CONTENT);
+   scroll.setLayoutParams(new android.widget.FrameLayout.LayoutParams(-1,-2));
+  }
   final boolean[] verifiedFormats={false};
   final boolean[] embeddedSearching={false};
   final String[] lastFormatError={""};
   boolean knownMediaPage=isMediaPage(initialUrl)||isNetworkMediaUrl(Uri.parse(initialUrl));
   if(mediaFormatCache.containsKey(initialUrl)){
    verifiedFormats[0]=true;
+   state.setText("Available video and audio formats detected.");
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
-  }else state.setText("Detecting actual video resolutions and audio formats from the playing video…");
-  if(knownMediaPage&&!verifiedFormats[0]){
+  }else state.setText("Checking playable video and audio formats. Available options appear below while detection runs…");
+  if(!verifiedFormats[0]){
    TextView hint=text("Checking exact resolutions… The options below are provisional until the media is inspected.",12,GRAY);
    hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
    addFormatChoices(quickOptions,initialUrl,quickChoices,dialog);
@@ -1379,21 +1383,22 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     settingRow(options,"▶  "+label,"Open this player's video and audio format choices",()->{
      dialog.dismiss();showMediaDownloadPanel(link,web);
     });
-    if(i<2&&!verifiedFormats[0]){
-     if(quickOptions.getChildCount()==0){
+    if(i<6&&!verifiedFormats[0]){
+     if(!verifiedFormats[0]){
       TextView fallback=text("Embedded video found • checking exact qualities. You can try the options below while detection continues.",12,GRAY);
       fallback.setPadding(dp(8),dp(8),0,dp(8));quickOptions.addView(fallback);
       java.util.List<MediaDownloadEngine.Choice> possible=new ArrayList<>();
       possible.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
       possible.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
       possible.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
-      addFormatChoices(quickOptions,link,possible,dialog);
+      if(quickOptions.getChildCount()==0)addFormatChoices(quickOptions,link,possible,dialog);
      }
      embeddedSearching[0]=true;
      inspectFormatsCached(link,new MediaFormatListener(){
       @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
        if(!dialog.isShowing()||verifiedFormats[0])return;
        verifiedFormats[0]=true;
+       mediaTitleCache.put(link,mediaTitle);
        state.setText("Detected embedded video: "+mediaTitle+" • Choose a resolution or audio format.");
        quickOptions.removeAllViews();
        addFormatChoices(quickOptions,link,choices,dialog);
@@ -1422,7 +1427,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(!dialog.isShowing())return;
     if(verifiedFormats[0])return;
     lastFormatError[0]=error;
-    state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Play the video if needed.":"No formats found for the page URL. Checking embedded players and detected streams…");
+    state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Available quality options will appear if the host exposes them.":"Page inspection unavailable. Play the video to capture its stream, or try the best-quality and audio options below.");
     settingRow(options,"↻  Retry format detection","Recheck the current video and its embedded player",()->{
      mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
      dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
