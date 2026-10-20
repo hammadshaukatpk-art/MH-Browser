@@ -147,10 +147,12 @@ public class BrowserActivity extends Activity {
   LinearLayout brandWords=column();brandWords.setPadding(dp(10),0,0,0);brand.addView(brandWords,new LinearLayout.LayoutParams(0,-2,1));
   TextView title=text(tabs.get(index).incognito?"Private Browsing":"MH Browser",23,WHITE);title.setTypeface(null,Typeface.BOLD);brandWords.addView(title);
   brandWords.addView(text("Fast  •  Private  •  Secure",12,0xffa8bcd5));
-  LinearLayout profile=column();profile.setGravity(Gravity.CENTER);brand.addView(profile,new LinearLayout.LayoutParams(dp(55),dp(68)));
-  TextView google=text("G",23,0xff4285f4);google.setTypeface(null,Typeface.BOLD);google.setGravity(Gravity.CENTER);
-  google.setBackground(grad(WHITE,0xffe7f3ff,30));profile.addView(google,new LinearLayout.LayoutParams(dp(42),dp(42)));
-  TextView account=text("Account",10,GRAY);account.setGravity(Gravity.CENTER);profile.addView(account);
+  LinearLayout profile=column();profile.setGravity(Gravity.CENTER);brand.addView(profile,new LinearLayout.LayoutParams(dp(70),dp(76)));
+  ImageView google=new ImageView(this);google.setImageResource(R.drawable.google_g);
+  google.setBackground(grad(WHITE,0xfff1f6ff,30));google.setPadding(dp(6),dp(6),dp(6),dp(6));
+  profile.addView(google,new LinearLayout.LayoutParams(dp(42),dp(42)));
+  TextView account=text("Google",10,WHITE);account.setGravity(Gravity.CENTER);profile.addView(account);
+  TextView login=text("Login Gmail",9,GRAY);login.setGravity(Gravity.CENTER);profile.addView(login);
   profile.setOnClickListener(v->googleAccount());
 
   if(tabs.get(index).incognito){
@@ -591,7 +593,10 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    android.net.Network net=cm.getActiveNetwork();NetworkCapabilities caps=cm.getNetworkCapabilities(net);
    if(caps!=null)type=caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)?"Wi-Fi":caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)?"Mobile data":"Other network";
   }catch(Exception ignored){}
-  dialog("Network information","Connection: "+type+"\nPublic IP and IP-based city cannot be reliably determined offline. Device GPS location and network IP location are different.");
+  String local="Unavailable";try{for(java.util.Enumeration<java.net.NetworkInterface> nets=java.net.NetworkInterface.getNetworkInterfaces();nets.hasMoreElements();){java.net.NetworkInterface net=nets.nextElement();if(!net.isUp()||net.isLoopback())continue;for(java.util.Enumeration<java.net.InetAddress> addresses=net.getInetAddresses();addresses.hasMoreElements();){java.net.InetAddress ip=addresses.nextElement();if(ip instanceof java.net.Inet4Address&&!ip.isLoopbackAddress()){local=ip.getHostAddress();break;}}if(!local.equals("Unavailable"))break;}}catch(Exception ignored){}
+  String info="Connection: "+type+"\nLocal IPv4: "+local+"\nTime zone: "+java.util.TimeZone.getDefault().getID()+"\nCountry (device locale): "+Locale.getDefault().getDisplayCountry()+"\nRegion (device locale): "+Locale.getDefault().toString();
+  themed().setTitle("Network diagnostics").setMessage(info+"\n\nPublic IP and approximate region require a separate online lookup.")
+   .setNegativeButton("Close",null).setPositiveButton("Check public IP",(d,n)->lookupPublicIp()).show();
  }
 
  void mediaDownloads(){
@@ -615,6 +620,23 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     }).setNegativeButton("Cancel",null).show();
    }catch(Exception e){dialog("Media downloads","This page did not expose a supported direct media file.");}
   });
+ }
+ void lookupPublicIp(){
+  themed().setTitle("Public IP lookup").setMessage("This sends your public IP to ipwho.is to retrieve approximate IP-based country, region and city. Continue?")
+   .setNegativeButton("Cancel",null).setPositiveButton("Continue",(d,n)->{
+    new Thread(()->{
+     String result="Lookup unavailable";
+     try{
+      java.net.HttpURLConnection c=(java.net.HttpURLConnection)new java.net.URL("https://ipwho.is/").openConnection();
+      c.setConnectTimeout(6500);c.setReadTimeout(6500);
+      try(java.io.InputStream in=c.getInputStream();java.util.Scanner scan=new java.util.Scanner(in,"UTF-8").useDelimiter("\\A")){
+       JSONObject data=new JSONObject(scan.hasNext()?scan.next():"{}");
+       if(data.optBoolean("success",false))result="Public IP: "+data.optString("ip")+"\nCountry: "+data.optString("country")+"\nRegion: "+data.optString("region")+"\nCity: "+data.optString("city")+"\nTime zone: "+data.optJSONObject("timezone").optString("id");
+      }finally{c.disconnect();}
+     }catch(Exception ignored){}
+     final String response=result;runOnUiThread(()->dialog("Public IP information",response+"\nLocation is approximate and based on public IP, not GPS."));
+    }).start();
+   }).show();
  }
  void downloads(){
   showingSettings=true;screen=8;head.removeAllViews();body.removeAllViews();sectionHeader("Downloads",this::display);
@@ -736,7 +758,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(list,"▤  Multi-window / Split screen","Video-only PiP when fullscreen; Android split screen",this::multiWindow);
   switchRow(list,"⊘  Do Not Track","Send DNT: 1 on direct page navigation","dnt",false);
   settingRow(list,"⚙  Advanced","Zoom, network and history controls",this::advanced);
-  settingRow(list,"ⓘ  About MH Browser","Version 1.0 • Android",()->dialog("MH Browser","V1.0 test build. Advanced privacy, proxy routing, and background media need further work."));
+  settingRow(list,"ⓘ  About MH Browser","Version 1.0 • MH Developers",()->dialog("About MH Browser","MH Browser\nVersion 1.0\n\nDevelopers\nMH Developers (Masum DEV)"));
  }
  void privacy(){
   showingSettings=true;screen=3;head.removeAllViews();body.removeAllViews();
