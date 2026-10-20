@@ -1350,10 +1350,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinearLayout directOptions=column();options.addView(directOptions);
   LinearLayout quickOptions=column();options.addView(quickOptions);
   state.setText("Choose a quality immediately. Exact available resolutions update automatically.");
-  java.util.List<MediaDownloadEngine.Choice> quickChoices=new ArrayList<>();
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
-  quickChoices.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
+  // Only confirmed extractor formats and detected streams are selectable.
   AlertDialog dialog=themed().setView(scroll).setNegativeButton("Close",null).create();
   settingRow(layout,"↓  Downloads • Pause / Resume","View download progress and pause or resume active transfers",()->{
    if(dialog.isShowing())dialog.dismiss();
@@ -1381,9 +1378,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
   }else state.setText("Checking playable video and audio formats. Available options appear below while detection runs…");
   if(!verifiedFormats[0]){
-   TextView hint=text("Best video and audio choices are available now; exact resolutions are shown only after the player exposes them.",12,GRAY);
+   TextView hint=text("Reading actual video qualities and audio formats. Only confirmed formats or captured media links can be downloaded.",12,GRAY);
    hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
-   addFormatChoices(quickOptions,initialUrl,quickChoices,dialog);
   }
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
@@ -1406,11 +1402,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
       quickOptions.removeAllViews();
       TextView fallback=text("Embedded video found • checking exact qualities. You can try the options below while detection continues.",12,GRAY);
       fallback.setPadding(dp(8),dp(8),0,dp(8));quickOptions.addView(fallback);
-      java.util.List<MediaDownloadEngine.Choice> possible=new ArrayList<>();
-      possible.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
-      possible.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
-      possible.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
-      addFormatChoices(quickOptions,link,possible,dialog);
+      // Never offer an unsupported generic page as a confirmed download.
      }
      embeddedSearching[0]=true;
      inspectFormatsCached(link,new MediaFormatListener(){
@@ -1446,7 +1438,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(!dialog.isShowing())return;
     if(verifiedFormats[0])return;
     lastFormatError[0]=error;
-    state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Available quality options will appear if the host exposes them.":"Page inspection unavailable. Play the video to capture its stream, or try the best-quality and audio options below.");
+    state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Available quality options will appear if the host exposes them.":"Page inspection unavailable. Play the video to capture its stream, or retry once the player loads.");
     settingRow(options,"↻  Retry format detection","Recheck the current video and its embedded player",()->{
      mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
      dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
@@ -1533,7 +1525,50 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
     }else startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
    });
+   if("HLS".equals(kind))addHlsResolutions(container,link,source.optString("referer",""),dialog);
   }
+ }
+ final Map<AlertDialog,Set<String>> hlsRequests=new java.util.WeakHashMap<>();
+ void addHlsResolutions(LinearLayout container,String playlist,String sourceReferer,AlertDialog dialog){
+  Set<String> requested=hlsRequests.computeIfAbsent(dialog,k->new HashSet<>());
+  if(!requested.add(playlist))return;
+  WebView w=tabs.isEmpty()?null:active();
+  String page=w==null?"":w.getUrl();
+  String referer=sourceReferer.startsWith("http")?sourceReferer:page;
+  String agent=w==null?"":w.getSettings().getUserAgentString();
+  HlsFormatInspector.inspect(getApplicationContext(),playlist,referer,agent,new HlsFormatInspector.Callback(){
+   @Override public void ready(java.util.List<HlsFormatInspector.Variant> formats){
+    runOnUiThread(()->{
+     if(!dialog.isShowing())return;
+     TextView label=text("CONFIRMED STREAM QUALITIES",12,0xff74d8ff);
+     label.setPadding(dp(8),dp(8),0,dp(8));container.addView(label);
+     for(HlsFormatInspector.Variant variant:formats){
+      settingRow(container,"▣  "+variant.label,"Download detected stream at this quality",()->{
+       dialog.dismiss();
+       MediaDownloadService.enqueue(getApplicationContext(),variant.url,
+        new MediaDownloadEngine.Choice(variant.label,0,null),referer,agent,mediaTitleForDownload(page));
+       Toast.makeText(BrowserActivity.this,"Video download queued • See Downloads for Pause / Resume",Toast.LENGTH_LONG).show();
+      });
+     }
+     settingRow(container,"♫  Audio • MP3","Extract audio from this accessible stream",()->{
+      dialog.dismiss();
+      MediaDownloadService.enqueue(getApplicationContext(),playlist,
+       new MediaDownloadEngine.Choice("Audio • MP3",0,"mp3"),referer,agent,mediaTitleForDownload(page));
+     });
+     settingRow(container,"♫  Audio • M4A","Extract audio from this accessible stream",()->{
+      dialog.dismiss();
+      MediaDownloadService.enqueue(getApplicationContext(),playlist,
+       new MediaDownloadEngine.Choice("Audio • M4A",0,"m4a"),referer,agent,mediaTitleForDownload(page));
+     });
+    });
+   }
+   @Override public void failed(String error){
+    runOnUiThread(()->{if(dialog.isShowing()){
+     TextView notice=text("Stream quality list unavailable; original stream may still be downloadable.",12,GRAY);
+     container.addView(notice);
+    }});
+   }
+  });
  }
  void addFormatChoices(LinearLayout options,String url,java.util.List<MediaDownloadEngine.Choice> choices,AlertDialog dialog){
   if(choices==null||choices.isEmpty())return;
