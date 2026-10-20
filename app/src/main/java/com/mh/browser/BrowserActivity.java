@@ -67,7 +67,10 @@ public class BrowserActivity extends Activity {
    if(h.equals("youtu.be"))return path.length()>1;
    if(h.equals("youtube.com")||h.endsWith(".youtube.com"))
     return (path.equals("/watch")&&p.getQueryParameter("v")!=null)||path.startsWith("/shorts/")||path.startsWith("/live/");
-   return false;
+   if(h.equals("soundcloud.com")||h.endsWith(".soundcloud.com"))return path.split("/").length>=3;
+   if(h.equals("vimeo.com")||h.endsWith(".vimeo.com"))return path.matches("/[0-9]+.*");
+   if(h.equals("dailymotion.com")||h.endsWith(".dailymotion.com"))return path.startsWith("/video/");
+   return path.matches("(?i).*\\.(mp3|m4a|mp4|webm|ogg|wav|mov)$");
   }catch(Exception e){return false;}
  }
  void signalMediaFound(WebView w){
