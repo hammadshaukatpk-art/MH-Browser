@@ -24,11 +24,25 @@ public class BrowserActivity extends Activity {
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
- createTab(false);String saved=prefs.getString("lastUrl","");if(!saved.isEmpty())navigate(saved);}
+ createTab(false);String saved=prefs.getString("lastUrl","");if(!saved.isEmpty())navigate(saved);showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
  TextView action(String glyph,int size,Runnable run){TextView t=text(glyph,size,WHITE);t.setGravity(Gravity.CENTER);t.setOnClickListener(v->run.run());return t;}
+ void showSplash(){
+   LinearLayout splash=column();splash.setBackgroundColor(BG);splash.setGravity(Gravity.CENTER);
+   ImageView emblem=new ImageView(this);emblem.setImageResource(R.drawable.app_logo);
+   splash.addView(emblem,new LinearLayout.LayoutParams(dp(120),dp(120)));
+   TextView name=text("MH Browser",29,WHITE);name.setTypeface(null,Typeface.BOLD);name.setGravity(Gravity.CENTER);
+   LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(-1,-2);nlp.topMargin=dp(20);splash.addView(name,nlp);
+   TextView subtitle=text("Fast  •  Private  •  Secure",15,GRAY);subtitle.setGravity(Gravity.CENTER);splash.addView(subtitle);
+   ProgressBar progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+   progress.setIndeterminate(true);LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(dp(130),dp(3));pp.topMargin=dp(48);splash.addView(progress,pp);
+   TextView version=text("Version 1.0",12,GRAY);version.setGravity(Gravity.CENTER);
+   LinearLayout.LayoutParams vp=new LinearLayout.LayoutParams(-1,-2);vp.topMargin=dp(22);splash.addView(version,vp);
+   setContentView(splash);
+   new Handler(Looper.getMainLooper()).postDelayed(()->{if(!isFinishing()&&!isDestroyed()){setContentView(root);root.requestApplyInsets();}},1250);
+ }
  void nav(String s,Runnable run){TextView t=action(s,25,run);bar.addView(t,new LinearLayout.LayoutParams(0,dp(58),1));}
  void controls(){bar.removeAllViews();bar.setPadding(dp(8),dp(2),dp(8),dp(2));nav("‹",()->{if(active().canGoBack())active().goBack();else navigate("about:blank");});nav("›",()->{if(active().canGoForward())active().goForward();});nav("⌂",()->navigate("about:blank"));nav("▣",this::tabList);nav("☰",this::menu);}
 
@@ -101,7 +115,7 @@ public class BrowserActivity extends Activity {
     }
   }
   LinearLayout hero=column();hero.setPadding(dp(20),dp(20),dp(20),dp(20));
-  hero.setBackground(grad(0xff24548b,0xff0b264b,20));
+  hero.setBackgroundResource(R.drawable.hero_mountains);
   LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,dp(174));hp.topMargin=dp(24);c.addView(hero,hp);
   TextView tag=text("EXPLORE MORE",11,0xff89eaff);tag.setTypeface(null,Typeface.BOLD);hero.addView(tag);
   TextView htitle=text("Discover the World",24,WHITE);htitle.setTypeface(null,Typeface.BOLD);
