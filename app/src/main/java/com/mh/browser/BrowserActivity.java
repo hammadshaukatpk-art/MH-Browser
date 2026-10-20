@@ -136,7 +136,10 @@ public class BrowserActivity extends Activity {
    ProxyConfig config=new ProxyConfig.Builder().addProxyRule(prefs.getString("proxyScheme","http")+"://"+host+":"+port).build();
    ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{});
   }catch(Exception ignored){}}
- }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();showSplash();}
+ }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();
+ // Private windows are an in-app transition, never replay the app launch splash.
+ if(!privateOnly)showSplash();
+ else root.requestApplyInsets();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -178,7 +181,9 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
- void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));
+ // Keep the normal browser visible underneath the isolated private activity.
+ overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -247,8 +252,26 @@ public class BrowserActivity extends Activity {
   }
   TextView add=action("+",27,()->createTab(false));add.setBackground(bg(PANEL));row.addView(add,new LinearLayout.LayoutParams(dp(39),dp(39)));
  }
- void closeTab(int n){if(n<0||n>=tabs.size())return;mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();Tab old=tabs.remove(n);old.web.stopLoading();old.web.destroy();
-  if(tabs.isEmpty()){index=-1;createTab(false);}else{if(n<index)index--;else if(n==index)index=Math.min(n,tabs.size()-1);display();}}
+ void closeTab(int n){
+  if(n<0||n>=tabs.size())return;
+  mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();
+  Tab old=tabs.remove(n);old.web.stopLoading();
+  if(old.web.getParent() instanceof ViewGroup)((ViewGroup)old.web.getParent()).removeView(old.web);
+  old.web.destroy();
+  if(tabs.isEmpty()){
+   index=-1;
+   if(privateOnly){
+    // Closing the final private tab ends the isolated window and reveals
+    // the existing main-browser Activity (no app restart or splash).
+    finish();overridePendingTransition(0,0);return;
+   }
+   createTab(false);
+  }else{
+   if(n<index)index--;
+   else if(n==index)index=Math.min(n,tabs.size()-1);
+   display();
+  }
+ }
  void tabActions(){String[] options={"New tab","New private tab","Close current tab","Switch tab"};themed().setTitle("Tabs").setItems(options,(d,n)->{if(n==0)createTab(false);else if(n==1)createTab(true);else if(n==2)closeTab(index);else tabPicker();}).show();}
  void tabPicker(){String[] names=new String[tabs.size()];for(int i=0;i<tabs.size();i++){String t=tabs.get(i).web.getTitle();names[i]=(tabs.get(i).incognito?"◉ ":"")+(t==null?"New tab":t);}themed().setTitle("Switch tab").setSingleChoiceItems(names,index,(d,n)->{index=n;d.dismiss();display();}).setNegativeButton("Close",null).show();}
 
@@ -391,7 +414,7 @@ public class BrowserActivity extends Activity {
     info.addView(text(t.incognito?"◉  PRIVATE TAB":"🌐  BROWSER TAB",11,0xff7dd8ff));
     TextView name=text(t.web.getTitle()==null?"New Tab":t.web.getTitle(),16,WHITE);name.setSingleLine(true);info.addView(name);
     info.setOnClickListener(v->{index=n;display();});
-    TextView close=action("×",26,()->{Tab old=tabs.remove(n);old.web.destroy();if(tabs.isEmpty()){index=-1;createTab(false);}else{index=Math.min(n,tabs.size()-1);tabList();}});
+    TextView close=action("×",26,()->{closeTab(n);if(!isFinishing()&&!isDestroyed()&&!tabs.isEmpty())tabList();});
     r.addView(close,new LinearLayout.LayoutParams(dp(45),dp(50)));
   }
   Button plus=new Button(this);plus.setText("+ New tab");items.addView(plus);plus.setOnClickListener(v->createTab(false));
@@ -1228,6 +1251,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(screen==6||screen==7||screen==8){display();return;}if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
   if(!"about:blank".equals(active().getUrl())){navigate("about:blank");return;}
+  if(privateOnly){finish();overridePendingTransition(0,0);return;}
   themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
    .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,i)->finish()).show();
  }
