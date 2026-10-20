@@ -172,11 +172,13 @@ public final class MediaDownloadEngine {
    }
   }catch(Exception ignored){}finally{if(temp.exists())temp.delete();}
  }
- private static YoutubeDLRequest downloadRequest(String url,Choice choice,File staging,File cachedInfo){
+ private static YoutubeDLRequest downloadRequest(String url,Choice choice,File staging,File cachedInfo,String referer,String userAgent){
   YoutubeDLRequest req=cachedInfo==null?new YoutubeDLRequest(url):
     new YoutubeDLRequest(Collections.<String>emptyList());
   if(cachedInfo!=null)req.addOption("--load-info-json",cachedInfo.getAbsolutePath());
   req.addOption("--no-playlist");
+  if(referer!=null&&referer.startsWith("http"))req.addOption("--referer",referer);
+  if(userAgent!=null&&!userAgent.isEmpty())req.addOption("--user-agent",userAgent);
   req.addOption("--no-mtime");
   req.addOption("--concurrent-fragments","4");
   req.addOption("--retries","5");
@@ -209,6 +211,9 @@ public final class MediaDownloadEngine {
   });
  }
  public static void download(Context context,String url,Choice choice,Callback callback){
+  download(context,url,choice,null,null,callback);
+ }
+ public static void download(Context context,String url,Choice choice,String referer,String userAgent,Callback callback){
   new Thread(()->{
    File staging=null;
    boolean acquired=false;
@@ -230,7 +235,7 @@ public final class MediaDownloadEngine {
     boolean cached=prepared!=null;
     callback.progress(0,cached?"Connecting to prepared video streams…":"Resolving media streams…");
     try{
-     YoutubeDLRequest req=downloadRequest(url,choice,staging,prepared);
+     YoutubeDLRequest req=downloadRequest(url,choice,staging,prepared,referer,userAgent);
      runDownload(req,callback);
     }catch(Exception cachedError){
      if(!cached)throw cachedError;
@@ -239,7 +244,7 @@ public final class MediaDownloadEngine {
      File[] partial=staging.listFiles();
      if(partial!=null)for(File part:partial)if(part.isFile())part.delete();
      callback.progress(0,"Refreshing expired media links…");
-     runDownload(downloadRequest(url,choice,staging,null),callback);
+     runDownload(downloadRequest(url,choice,staging,null,referer,userAgent),callback);
     }
     File[] files=staging.listFiles();
     File result=null;int bestScore=-1;
