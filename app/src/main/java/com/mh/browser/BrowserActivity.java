@@ -17,12 +17,17 @@ import android.app.DownloadManager;
 import android.os.Environment;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
+import android.content.res.Configuration;
+import android.util.Rational;
+import android.graphics.drawable.Drawable;
 import androidx.webkit.ProxyConfig;
 import androidx.webkit.ProxyController;
 import androidx.webkit.WebViewFeature;
 public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
+ View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer;
+ boolean inPip=false;
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs;
  static class Tab {WebView web; boolean incognito; Tab(WebView w,boolean p){web=w;incognito=p;}}
@@ -88,6 +93,8 @@ public class BrowserActivity extends Activity {
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
  w.setWebChromeClient(new WebChromeClient(){
+  @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
+  @Override public void onHideCustomView(){hideVideo();}
   @Override public boolean onJsAlert(WebView view,String url,String message,JsResult result){
    themed().setTitle("Website message").setMessage(message).setPositiveButton("OK",(d,n)->result.confirm()).setOnCancelListener(d->result.cancel()).show();return true;
   }
@@ -224,9 +231,43 @@ public class BrowserActivity extends Activity {
   active().reload();Toast.makeText(this,enabled?"Desktop mode enabled":"Mobile mode enabled",Toast.LENGTH_SHORT).show();
  }
  void pictureInPicture(){
-  if(Build.VERSION.SDK_INT>=26){try{enterPictureInPictureMode(new android.app.PictureInPictureParams.Builder().build());}
-   catch(Exception e){dialog("Picture in picture","This device or page does not support picture in picture.");}}
+  if(Build.VERSION.SDK_INT<26){dialog("Picture in picture","Android 8 or newer is required.");return;}
+  if(fullscreenVideo==null){dialog("Video-only Picture in Picture","First play a video and enter its fullscreen player, then choose Picture in Picture. This prevents the browser tabs and address bar from appearing in the floating window.");return;}
+  try{
+   android.app.PictureInPictureParams params=new android.app.PictureInPictureParams.Builder()
+    .setAspectRatio(new Rational(16,9)).build();
+   enterPictureInPictureMode(params);
+  }catch(Exception e){dialog("Picture in picture","Picture in picture is not available for this video or device.");}
  }
+ void showVideo(View v,WebChromeClient.CustomViewCallback cb){
+  if(fullscreenVideo!=null){cb.onCustomViewHidden();return;}
+  fullscreenVideo=v;fullscreenCallback=cb;
+  videoLayer=new FrameLayout(this);videoLayer.setBackgroundColor(Color.BLACK);
+  if(v.getParent() instanceof ViewGroup)((ViewGroup)v.getParent()).removeView(v);
+  videoLayer.addView(v,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
+  ((ViewGroup)getWindow().getDecorView()).addView(videoLayer,new ViewGroup.LayoutParams(-1,-1));
+  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  getWindow().getDecorView().setSystemUiVisibility(5894|1024|512);
+ }
+ void hideVideo(){
+  if(fullscreenVideo==null)return;
+  if(videoLayer!=null){videoLayer.removeAllViews();((ViewGroup)getWindow().getDecorView()).removeView(videoLayer);}
+  fullscreenVideo=null;videoLayer=null;
+  WebChromeClient.CustomViewCallback cb=fullscreenCallback;fullscreenCallback=null;
+  if(cb!=null)cb.onCustomViewHidden();
+  getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  getWindow().getDecorView().setSystemUiVisibility(0);
+ }
+ @Override public void onPictureInPictureModeChanged(boolean pip,Configuration config){
+  super.onPictureInPictureModeChanged(pip,config);inPip=pip;
+  if(videoLayer!=null){videoLayer.setVisibility(View.VISIBLE);}
+  if(!pip&&fullscreenVideo==null)display();
+ }
+ @Override public void onUserLeaveHint(){
+  super.onUserLeaveHint();
+  if(fullscreenVideo!=null&&Build.VERSION.SDK_INT>=26&&prefs.getBoolean("audio",false))pictureInPicture();
+ }
+
  class MhDialogBuilder extends AlertDialog.Builder {
  MhDialogBuilder(){super(BrowserActivity.this,android.R.style.Theme_Material_Dialog_Alert);}
  @Override public AlertDialog show(){AlertDialog d=super.show();styleDialog(d);return d;}
@@ -447,13 +488,14 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   });});d.show();
  }
  @Override public void onBackPressed(){
+  if(fullscreenVideo!=null){hideVideo();return;}
   if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
   if(!"about:blank".equals(active().getUrl())){navigate("about:blank");return;}
   themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
    .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,i)->finish()).show();
  }
- @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false)&&!isInPictureInPictureMode())for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
+ @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false)&&!inPip)for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
  @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
- @Override protected void onDestroy(){for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}super.onDestroy();}
+ @Override protected void onDestroy(){if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}super.onDestroy();}
 }
