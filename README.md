@@ -1,16 +1,31 @@
-# MH Browser — Android v1.0
+# MH Browser — Android V1.0 (development preview)
 
-Android WebView browser foundation based on the approved MH Browser concept.
+Android browser using Android System WebView (Chromium-based). Branded navy/cyan UI with horizontal tab strip, editable home shortcuts, tab switching, Google search, bookmarks and history, dark dialogs, settings and direct-file downloads.
 
-## Implemented foundation
-- Navy branded start page, Google search, shortcuts and nav controls.
-- WebView tabs, forward/back/home/reload, normal and private tabs.
-- Persistent normal browser cookies and last-visited URL.
-- Site Safe Browsing, HTTPS mixed-content blocking, a basic tracker blocklist and third-party cookie preference.
-- Privacy and appearance/settings screens, clear browsing data, proxy configuration form, background-playback preference and exit dialog.
-- Android Github Actions workflow for a debug APK.
+## Implemented
+- One home search field (the page address bar appears only on web pages).
+- Horizontal tab strip with per-tab close, tab creation, switching and independent WebViews.
+- Saved normal-tab URLs and current selection across app relaunches; private tabs are not restored.
+- Editable/addable/removable Quick Access shortcuts stored on device.
+- Dark themed menu, confirmations, edit dialogs, settings and exit prompt.
+- General settings: JavaScript, image loading, zoom, desktop user agent for new tabs and restore tabs.
+- Privacy: limited tracker domain blocking, third-party cookie toggle, Safe Browsing and mixed-content blocking; DNT header on direct app navigations.
+- Bookmarks, recent URL history and clear browsing data.
+- Direct HTTP/HTTPS file downloads using Android Download Manager.
+- AndroidX WebKit HTTP proxy override (host and port, if supported by the installed Android System WebView), with apply/disable.
+- Android system split-screen eligibility and experimental picture-in-picture.
+- Optional background media continuation where websites and Android allow it.
+- Permission-gated website geolocation.
 
-## Important limitations
-This is an **unverified v1.0 starter**, not a finished competitor to Chrome or Brave. It has NOT been built or device-tested. WebView cookie storage is shared across tabs; private-mode isolation and data erasure are not guaranteed in this implementation. Tab/form/history state across process death is not fully restored. Proxy settings are saved but **not connected to the network stack**, so the proxy does not run. Background media is website-dependent. Split-screen depends on the Android OS, not just this app. No VPN, IP address changer, fake GPS, or device-identity spoofing. HTTPS encryption does not imply anonymity.
+## Not complete / important limitations
+- **Incognito is not securely isolated from normal WebView cookies in this preview.** Do not use it for sensitive private sessions.
+- Tab URL restoration does not preserve every in-page form, scroll position, playback state, or complete navigation stack.
+- HTTP proxy support is unauthenticated only; username/password and SOCKS5 proxies are **not supported**. No VPN or IP/GPS spoofing.
+- Android split-screen availability depends on device OS; PiP and background audio depend on Android and individual websites.
+- Downloads require a direct file URL; arbitrary streaming video/audio extraction, DRM bypass and resolution picking are not provided.
+- DNT headers are advisory and are not guaranteed for every subresource or redirect.
+- Tracker blocking is limited, not equivalent to Brave's full protections.
+- Not yet tested on physical Android devices. APK compilation does not establish functional correctness.
 
-Build with Android SDK 35, JDK 17, Gradle 8.9; see Actions tab for build status.
+## Build
+JDK 17, Android SDK 35, Gradle 8.9. GitHub Actions builds a debug APK. This is a development preview, not a production privacy browser.
