@@ -27,7 +27,7 @@ public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
  View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer;
- boolean inPip=false, inlineVideoFocus=false, mediaPlaying=false, privateOnly=false;
+ boolean inPip=false, inlineVideoFocus=false, mediaPlaying=false, privateOnly=false; int historyFilter=0,downloadFilter=0;
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs;
  static class Tab {WebView web; boolean incognito,desktop; Tab(WebView w,boolean p,boolean d){web=w;incognito=p;desktop=d;}}
@@ -480,6 +480,16 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   JSONArray entries=readArray("history");
   ScrollView sc=new ScrollView(this);body.addView(sc);
   LinearLayout list=column();list.setPadding(dp(15),dp(10),dp(15),dp(25));sc.addView(list);
+
+  String[] periods={"Today","Previous Day","Week","Monthly","Yearly","All"};
+  HorizontalScrollView filterScroll=new HorizontalScrollView(this);filterScroll.setHorizontalScrollBarEnabled(false);list.addView(filterScroll);
+  LinearLayout filters=row();filters.setPadding(0,dp(3),0,dp(10));filterScroll.addView(filters);
+  for(int i=0;i<periods.length;i++){final int n=i;
+   TextView chip=action(periods[i],12,()->{historyFilter=n;history();});
+   chip.setPadding(dp(13),0,dp(13),0);
+   chip.setBackground(grad(historyFilter==i?0xff2477ac:0xff172e48,historyFilter==i?0xff1b567e:0xff10253e,15));
+   LinearLayout.LayoutParams clp=new LinearLayout.LayoutParams(-2,dp(39));clp.rightMargin=dp(7);filters.addView(chip,clp);
+  }
   if(entries.length()==0){TextView empty=text("No browsing history yet",17,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(12),dp(55),dp(12),dp(40));list.addView(empty);return;}
   TextView sub=text("Select individual pages or whole periods to remove them. Private tabs are not recorded.",12,GRAY);
   sub.setPadding(dp(5),dp(6),dp(5),dp(16));list.addView(sub);
@@ -487,8 +497,18 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinkedHashMap<String,ArrayList<Integer>> groups=new LinkedHashMap<>();
   for(int i=0;i<entries.length();i++){
    JSONObject obj=entries.optJSONObject(i);long t=obj==null?0:obj.optLong("time",0);
+
+   Calendar cal=Calendar.getInstance(),start=Calendar.getInstance();start.set(Calendar.HOUR_OF_DAY,0);start.set(Calendar.MINUTE,0);start.set(Calendar.SECOND,0);start.set(Calendar.MILLISECOND,0);
+   long today=start.getTimeInMillis();boolean include=true;
+   if(historyFilter==0)include=t>=today;
+   else if(historyFilter==1)include=t>=today-86400000L&&t<today;
+   else if(historyFilter==2)include=t>=today-7*86400000L;
+   else if(historyFilter==3){start.set(Calendar.DAY_OF_MONTH,1);include=t>=start.getTimeInMillis();}
+   else if(historyFilter==4){start.set(Calendar.DAY_OF_YEAR,1);include=t>=start.getTimeInMillis();}
+   if(!include)continue;
    String g=historyGroup(t);if(!groups.containsKey(g))groups.put(g,new ArrayList<>());groups.get(g).add(i);
   }
+  if(groups.isEmpty()){TextView empty=text("No visits for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(45),0,dp(35));list.addView(empty);}
   for(Map.Entry<String,ArrayList<Integer>> group:groups.entrySet()){
    LinearLayout heading=row();heading.setPadding(dp(5),dp(14),dp(5),dp(10));list.addView(heading);
    TextView label=text(group.getKey(),17,0xff77d5ff);label.setTypeface(null,Typeface.BOLD);heading.addView(label,new LinearLayout.LayoutParams(0,-2,1));
@@ -689,7 +709,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  @Override public void onBackPressed(){
   if(inlineVideoFocus){restoreInlineVideo();return;}
   if(fullscreenVideo!=null){hideVideo();return;}
-  if(screen==6||screen==7){display();return;}if(screen>=2){settings();return;}if(screen==1){display();return;}
+  if(screen==6||screen==7||screen==8){display();return;}if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
   if(!"about:blank".equals(active().getUrl())){navigate("about:blank");return;}
   themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
