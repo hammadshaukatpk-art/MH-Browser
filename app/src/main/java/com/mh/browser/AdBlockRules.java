@@ -136,7 +136,9 @@ final class AdBlockRules {
   if(matches(target,AD_HOSTS)||blockedDomain(target)||filterDomain(target))return true;
   String path=destination.getPath();if(path==null)path="";
   path=path.toLowerCase(Locale.ROOT);
-  return path.matches(".*(/popunder|/popads|/clickads|/advert|/adclick|/ad-redirect|/redirect-ad)(/.*)?");
+  // When a player is clicked, an unrelated top-level site switch is a
+  // common ad hijack. The original page remains available in its tab.
+  return true;
  }
  /** Stop known ad/tracker landing pages even when a click attempts top-level navigation. */
  static boolean shouldBlockNavigation(Uri uri,boolean ads){
