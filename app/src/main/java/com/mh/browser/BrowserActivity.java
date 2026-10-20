@@ -39,7 +39,7 @@ public class BrowserActivity extends Activity {
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
  final Map<WebView,Integer> mediaInjectionStages=new java.util.WeakHashMap<>();
  final Map<WebView,String> pageForFiltering=java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
- final Map<WebView,Long> recentPlayerTap=new java.util.WeakHashMap<>();
+ final Map<WebView,Long> recentPlayerTap=java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
  AlertDialog activeMediaDialog;
  LinearLayout activeDirectMediaOptions;
  String activeMediaPage;
@@ -301,7 +301,7 @@ public class BrowserActivity extends Activity {
   @JavascriptInterface public void found(){runOnUiThread(()->signalMediaFound(w));}
   @JavascriptInterface public void pageChanged(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;mediaAvailable=isMediaPage(w.getUrl());updateMediaOverlay();if(mediaAvailable)prefetchMediaFormats(w.getUrl());}});}
   @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
-  @JavascriptInterface public void playerTap(){runOnUiThread(()->recentPlayerTap.put(w,SystemClock.elapsedRealtime()));}
+  @JavascriptInterface public void playerTap(){recentPlayerTap.put(w,SystemClock.elapsedRealtime());}
   @JavascriptInterface public void candidateWithRef(String link,String referer){
    if(link==null||link.length()>4096||referer==null||referer.length()>4096)return;
    runOnUiThread(()->{
@@ -367,7 +367,7 @@ public class BrowserActivity extends Activity {
     if(prefs.getBoolean("adBlocker",true)){
      if(AdBlockRules.shouldBlockNavigation(target,true))return true;
      Long tapped=recentPlayerTap.get(view);
-     if(tapped!=null&&SystemClock.elapsedRealtime()-tapped<3000&&
+     if(tapped!=null&&SystemClock.elapsedRealtime()-tapped<5000&&
         AdBlockRules.isCrossSiteAdRedirect(target,pageForFiltering.get(view)))return true;
     }
     return false;
@@ -440,7 +440,7 @@ public class BrowserActivity extends Activity {
    Long tapped=recentPlayerTap.get(v);
    if(AdBlockRules.shouldBlockNavigation(Uri.parse(u==null?"":u),prefs.getBoolean("adBlocker",true))||
       (prefs.getBoolean("adBlocker",true)&&tapped!=null&&
-       SystemClock.elapsedRealtime()-tapped<3000&&
+       SystemClock.elapsedRealtime()-tapped<5000&&
        AdBlockRules.isCrossSiteAdRedirect(Uri.parse(u==null?"":u),pageForFiltering.get(v)))){
     v.stopLoading();
     if(v.canGoBack())v.goBack();
