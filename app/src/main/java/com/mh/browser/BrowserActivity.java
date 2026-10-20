@@ -156,8 +156,13 @@ public class BrowserActivity extends Activity {
    ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{});
   }catch(Exception ignored){}}
  }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();
- // Private windows are an in-app transition, never replay the app launch splash.
- root.requestApplyInsets();}
+ // Display the browser immediately without any custom splash delay.
+ root.requestApplyInsets();
+ if(!privateOnly&&getIntent()!=null&&getIntent().getBooleanExtra("openDownloads",false)){
+  getIntent().removeExtra("openDownloads");
+  downloads();
+ }
+}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
