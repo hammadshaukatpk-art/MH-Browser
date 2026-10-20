@@ -36,6 +36,8 @@ public class BrowserActivity extends Activity {
  final Map<String,String> mediaTitleCache=new HashMap<>();
  final Map<String,JSONArray> directMediaCache=new HashMap<>();
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
+ final Map<WebView,Integer> mediaInjectionStages=new java.util.WeakHashMap<>();
+ final Map<WebView,Set<String>> networkMediaSeen=new java.util.WeakHashMap<>();
  final Map<WebView,String> lastWorkingPage=new java.util.WeakHashMap<>();
  final Map<WebView,Long> videoConnectionRecovery=new java.util.WeakHashMap<>();
  final Set<String> mediaInspecting=new HashSet<>();
@@ -283,6 +285,15 @@ public class BrowserActivity extends Activity {
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
+  @Override public void onProgressChanged(WebView view,int progress){
+   if(progress<20)return;
+   int stage=progress>=80?2:1;
+   Integer last=mediaInjectionStages.get(view);
+   if(last!=null&&last>=stage)return;
+   mediaInjectionStages.put(view,stage);
+   if(view.getUrl()!=null&&view.getUrl().startsWith("http"))
+    view.evaluateJavascript(mediaObserverScript(),null);
+  }
   @Override public void onHideCustomView(){hideVideo();}
   @Override public boolean onJsAlert(WebView view,String url,String message,JsResult result){
    themed().setTitle("Website message").setMessage(message).setPositiveButton("OK",(d,n)->result.confirm()).setOnCancelListener(d->result.cancel()).show();return true;
@@ -370,6 +381,8 @@ public class BrowserActivity extends Activity {
     recoverFailedVideoHost(v,request.getUrl().toString(),detail);
   }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
+   mediaInjectionStages.remove(v);
+   networkMediaSeen.remove(v);
    if(v==active()){
     mediaPlaying=false;mediaAvailable=isMediaPage(u);updateMediaOverlay();
     if(isMediaPage(u))prefetchMediaFormats(u);
@@ -391,7 +404,13 @@ public class BrowserActivity extends Activity {
     if(recovery==null||SystemClock.elapsedRealtime()-recovery>5000)lastWorkingPage.put(v,u);
    }
    refreshTabTitle(v);
- v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;var found=false,lastHref=location.href;function watch(){if(location.href!==lastHref){lastHref=location.href;found=false;MHMedia.pageChanged()}var media=document.querySelectorAll('video,audio');if(media.length&&!found){found=true;MHMedia.found()}media.forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
+ v.evaluateJavascript(mediaObserverScript(),null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
+   if(AdBlockRules.shouldBlock(req,prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
+    return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
+   if(!req.isForMainFrame()&&isNetworkMediaUrl(req.getUrl()))
+    v.post(()->noteNetworkMedia(v,req.getUrl()));
+   return null;
+  }});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){
   showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();
@@ -1011,6 +1030,60 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    .setNegativeButton("Close",null).setPositiveButton("Check public IP",(d,n)->lookupPublicIp()).show();
  }
 
+ // Detect media on dynamically rendered pages, SPA routes and supported embeds.
+ // A media element's presence triggers the button; the download engine separately
+ // determines whether the site provides an accessible, non-DRM source.
+ String mediaObserverScript(){
+  return "(function(){"+
+   "if(!document.documentElement||!window.MHMedia)return;"+
+   "if(window.mhMediaInit){if(window.mhMediaScan)window.mhMediaScan();return;}"+
+   "window.mhMediaInit=true;var found=false,lastHref=location.href;"+
+   "function scan(){try{"+
+   "if(location.href!==lastHref){lastHref=location.href;found=false;MHMedia.pageChanged();}"+
+   "var els=document.querySelectorAll('video,audio');"+
+   "var embeds=document.querySelectorAll('iframe[src],embed[src],object[data]');"+
+   "var hasEmbed=false;embeds.forEach(function(el){var u=el.getAttribute('src')||el.getAttribute('data')||'';"+
+   "if(/(youtube\\.com\\/embed|youtu\\.be\\/|player\\.vimeo\\.com|dailymotion\\.com\\/embed|facebook\\.com\\/plugins\\/video|instagram\\.com\\/reel|tiktok\\.com\\/embed|soundcloud\\.com\\/player|streamable\\.com\\/e\\/|\\/embed\\/|\\/player\\/)/i.test(u))hasEmbed=true;});"+
+   "var meta=document.querySelector('meta[property=\\\"og:video\\\"],meta[property=\\\"og:audio\\\"],meta[name=\\\"twitter:player\\\"]');"+
+   "if((els.length||hasEmbed||meta)&&!found){found=true;MHMedia.found();}"+
+   "els.forEach(function(el){if(el.dataset.mhTracked)return;el.dataset.mhTracked='1';"+
+   "el.addEventListener('play',function(){MHMedia.playing();});"+
+   "el.addEventListener('playing',function(){MHMedia.playing();});"+
+   "el.addEventListener('pause',function(){MHMedia.stopped();});});"+
+   "}catch(e){}}"+
+   "window.mhMediaScan=scan;scan();"+
+   "new MutationObserver(function(){scan();}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','poster']});"+
+   "document.addEventListener('play',function(e){if(e.target&&/^(VIDEO|AUDIO)$/.test(e.target.tagName))MHMedia.playing();},true);"+
+   "window.addEventListener('popstate',scan);"+
+   "setInterval(scan,2200);"+
+   "})()";
+ }
+ boolean isNetworkMediaUrl(Uri u){
+  if(u==null)return false;
+  String path=u.getPath();if(path==null)return false;
+  return path.toLowerCase(Locale.ROOT).matches(".*\\\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd)$");
+ }
+ void noteNetworkMedia(WebView v,Uri media){
+  if(tabs.isEmpty()||v!=active()||media==null)return;
+  String page=v.getUrl(),link=media.toString();
+  if(page==null||!page.startsWith("http"))return;
+  Set<String> seen=networkMediaSeen.get(v);
+  if(seen==null){seen=new HashSet<>();networkMediaSeen.put(v,seen);}
+  if(seen.contains(link))return;
+  if(seen.size()>=32)return;
+  seen.add(link);
+  mediaAvailable=true;updateMediaOverlay();
+  String path=media.getPath()==null?"":media.getPath().toLowerCase(Locale.ROOT);
+  if(path.endsWith(".m3u8")||path.endsWith(".mpd"))return; // adaptive streams need extraction/DRM checks
+  String kind=path.matches(".*\\\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
+  JSONArray direct=directMediaCache.get(page);
+  if(direct==null){direct=new JSONArray();directMediaCache.put(page,direct);}
+  if(direct.length()>=12)return;
+  for(int i=0;i<direct.length();i++)if(link.equals(direct.optJSONObject(i).optString("url")))return;
+  JSONObject o=new JSONObject();
+  try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":"video/*");o.put("label","Detected stream");direct.put(o);}
+  catch(Exception ignored){}
+ }
  String mediaSourceScript(){
   return "(function(){var out=[],seen={};"+
    "document.querySelectorAll('video,audio').forEach(function(m){"+
@@ -1418,6 +1491,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   TextView general=text("GENERAL",12,0xff64caff);general.setPadding(dp(8),dp(15),0,dp(13));list.addView(general);
   settingRow(list,"⚙  General","Search, JavaScript, images and startup",this::general);
   settingRow(list,"◉  Privacy & Security","Tracker protection, cookies, safe browsing",()->privacy());
+  switchRow(list,"🛡  Ad Blocker","Block known advertising domains • On by default","adBlocker",true);
   settingRow(list,"⇄  Proxy settings","HTTP, HTTPS, SOCKS5 and optional credentials",this::proxy);
   settingRow(list,"▣  Site settings","Location access and website permissions",this::siteSettings);
   settingRow(list,"↓  Downloads","Android Download Manager",this::downloads);
@@ -1435,6 +1509,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   TextView title=text("Privacy & Security",22,WHITE);title.setTypeface(null,Typeface.BOLD);h.addView(title);
   ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(15),dp(15),dp(20));sc.addView(list);
   switchRow(list,"Block known trackers","Limited built-in domain blocklist","trackers",true);
+  switchRow(list,"Ad Blocker","Block known ad requests on websites • On by default","adBlocker",true);
   switchRow(list,"Block third-party cookies","Takes effect when opening a new tab","blockCookies",true);
   settingRow(list,"Safe Browsing","Android WebView Safe Browsing is enabled",()->dialog("Safe Browsing","Helps protect against known unsafe sites."));
   settingRow(list,"HTTPS protection","Mixed HTTP content blocked on HTTPS pages",()->dialog("HTTPS","Connections are protected by HTTPS when supported. This does not hide your identity or IP address."));
