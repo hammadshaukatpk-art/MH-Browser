@@ -94,7 +94,14 @@ public final class MediaDownloadEngine {
      if("mp3".equals(choice.audioFormat))req.addOption("--audio-quality","192K");
     }else{
      String quality=choice.height>0?"[height<="+choice.height+"]":"";
-     req.addOption("-f","bestvideo"+quality+"[ext=mp4]+bestaudio[ext=m4a]/bestvideo"+quality+"+bestaudio/best"+quality+"/best");
+     // Prefer AVC/H.264 video and AAC/M4A audio: most Android devices decode these reliably.
+     // Fall back only when the provider does not offer an Android-friendly format.
+     req.addOption("-f",
+      "bestvideo"+quality+"[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"+
+      "best"+quality+"[ext=mp4][vcodec^=avc1]/"+
+      "bestvideo"+quality+"[ext=mp4]+bestaudio[ext=m4a]/"+
+      "best"+quality+"[ext=mp4]/"+
+      "bestvideo"+quality+"+bestaudio/best"+quality);
      req.addOption("--merge-output-format","mp4");
     }
     String processId="mh-"+UUID.randomUUID();
@@ -103,15 +110,26 @@ public final class MediaDownloadEngine {
      return kotlin.Unit.INSTANCE;
     });
     File[] files=staging.listFiles();
-    File result=null;
+    File result=null;int bestScore=-1;
     if(files!=null)for(File f:files){
-     if(!f.isFile()||f.getName().endsWith(".part")||f.getName().endsWith(".ytdl"))continue;
-     if(result==null||f.length()>result.length())result=f;
+     if(!f.isFile()||f.length()==0)continue;
+     String lower=f.getName().toLowerCase(java.util.Locale.ROOT);
+     if(lower.endsWith(".part")||lower.endsWith(".ytdl")||lower.endsWith(".temp")||lower.endsWith(".json"))continue;
+     int score;
+     if("mp3".equals(choice.audioFormat))score=lower.endsWith(".mp3")?100:0;
+     else if("m4a".equals(choice.audioFormat))score=lower.endsWith(".m4a")?100:0;
+     else score=lower.endsWith(".mp4")?100:lower.endsWith(".mkv")?85:lower.endsWith(".webm")?80:0;
+     if(score==0)continue;
+     if(score>bestScore||(score==bestScore&&result!=null&&f.length()>result.length())){
+      result=f;bestScore=score;
+     }
     }
-    if(result==null||result.length()==0)throw new IllegalStateException("No finished media file was produced");
-    String mime="mp3".equals(choice.audioFormat)?"audio/mpeg":
-      "m4a".equals(choice.audioFormat)?"audio/mp4":
-      result.getName().endsWith(".webm")?"video/webm":"video/mp4";
+    if(result==null)throw new IllegalStateException("No playable completed media file was produced");
+    String lowerName=result.getName().toLowerCase(java.util.Locale.ROOT);
+    String mime=lowerName.endsWith(".mp3")?"audio/mpeg":
+      lowerName.endsWith(".m4a")?"audio/mp4":
+      lowerName.endsWith(".webm")?"video/webm":
+      lowerName.endsWith(".mkv")?"video/x-matroska":"video/mp4";
     Uri saved=publish(context,result,mime);
     callback.completed(result.getName(),saved.toString(),mime);
    }catch(Exception ex){callback.failed("Download failed. "+safeError(ex));}
