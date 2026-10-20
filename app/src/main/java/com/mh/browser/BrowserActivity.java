@@ -87,7 +87,7 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
- void createTab(boolean inc){if(inc&&!privateOnly){startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -95,8 +95,8 @@ public class BrowserActivity extends Activity {
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
  w.addJavascriptInterface(new Object(){
-  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;}});}
-  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active())mediaPlaying=false;});}
+  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;updateAutoPip();}});}
+  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateAutoPip();}});}
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
@@ -301,6 +301,13 @@ public class BrowserActivity extends Activity {
   if(t.web.getUrl()!=null&&t.web.getUrl().startsWith("http"))t.web.reload();
   Toast.makeText(this,t.desktop?"Desktop site requested":"Mobile site requested",Toast.LENGTH_SHORT).show();
  }
+ void updateAutoPip(){
+  if(Build.VERSION.SDK_INT>=31&&!isInPictureInPictureMode()){
+   try{setPictureInPictureParams(new android.app.PictureInPictureParams.Builder()
+    .setAspectRatio(new Rational(16,9)).setAutoEnterEnabled(mediaPlaying).build());}
+   catch(Exception ignored){}
+  }
+ }
  void pictureInPicture(){
   if(Build.VERSION.SDK_INT<26){dialog("Picture in picture","Android 8 or newer is required.");return;}
   if(fullscreenVideo==null&&!inlineVideoFocus){
@@ -350,6 +357,7 @@ public class BrowserActivity extends Activity {
  @Override public void onPictureInPictureModeChanged(boolean pip,Configuration config){
   super.onPictureInPictureModeChanged(pip,config);inPip=pip;
   if(videoLayer!=null){videoLayer.setVisibility(View.VISIBLE);}
+  if(pip&&fullscreenVideo==null&&!inlineVideoFocus)focusInlineVideo();
   if(!pip){restoreInlineVideo();if(fullscreenVideo==null)display();}
  }
  @Override public void onUserLeaveHint(){
@@ -658,12 +666,14 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    });chip.setPadding(dp(13),0,dp(13),0);chip.setBackground(grad(downloadFilter==i?0xff2373a8:PANEL,downloadFilter==i?0xff1a4f7a:PANEL,14));
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(39));lp.rightMargin=dp(7);filters.addView(chip,lp);
   }
-  JSONArray a=readArray("downloads");int shown=0;
+  JSONArray a=readArray("downloads");int shown=0;String lastDate="";
   DownloadManager dm=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
   for(int i=a.length()-1;i>=0;i--){
    JSONObject item=a.optJSONObject(i);if(item==null)continue;long t=item.optLong("time"),id=item.optLong("id");
    if(!downloadMatches(t))continue;shown++;
    String name=item.optString("name","Downloaded file");
+   String day=new java.text.SimpleDateFormat("EEEE, MMM d, yyyy",Locale.getDefault()).format(new Date(t));
+   if(!day.equals(lastDate)){lastDate=day;TextView groupTitle=text(day,14,0xff7dd9ff);groupTitle.setTypeface(null,Typeface.BOLD);groupTitle.setPadding(dp(5),dp(17),0,dp(5));list.addView(groupTitle);}
    LinearLayout card=row();card.setPadding(dp(14),dp(12),dp(10),dp(12));card.setBackground(grad(0xff193753,0xff10253e,13));
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(9);list.addView(card,lp);
    LinearLayout info=column();card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
