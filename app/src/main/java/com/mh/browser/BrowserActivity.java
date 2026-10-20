@@ -180,8 +180,38 @@ public class BrowserActivity extends Activity {
   Button priv=new Button(this);priv.setText("+ Private tab");items.addView(priv);priv.setOnClickListener(v->createTab(true));
  }
 
- void menu(){String[] choices={"New tab","New incognito tab","Tabs","Bookmarks","History","Downloads","Settings","Share page","Desktop site"};themed().setTitle("MH Browser").setItems(choices,(d,i)->{switch(i){case 0:createTab(false);break;case 1:createTab(true);break;case 2:tabList();break;case 3:dialog("Bookmarks","Bookmark manager planned for a future release.");break;case 4:dialog("History","Use Back and Forward to navigate saved session history.");break;case 5:dialog("Downloads","A download manager will be added in a future release.");break;case 6:settings();break;case 7:Intent share=new Intent(Intent.ACTION_SEND);share.setType("text/plain");share.putExtra(Intent.EXTRA_TEXT,active().getUrl());startActivity(Intent.createChooser(share,"Share page"));break;case 8:dialog("Desktop site","Desktop site toggle requires additional integration.");}}).show();}
- AlertDialog.Builder themed(){return new AlertDialog.Builder(this,android.R.style.Theme_Material_Dialog_Alert);}
+ void menu(){
+ String[] choices={"＋ New tab","◉ New private tab","▣ Switch tabs","☆ Bookmarks","◷ History","↓ Downloads","⚙ Settings","↗ Share page","▤ Desktop site","◫ Picture in picture"};
+ themed().setTitle("MH Browser").setItems(choices,(d,i)->{
+  switch(i){
+   case 0:createTab(false);break;case 1:createTab(true);break;case 2:tabPicker();break;
+   case 3:bookmarks();break;case 4:history();break;case 5:downloads();break;case 6:settings();break;
+   case 7:Intent share=new Intent(Intent.ACTION_SEND);share.setType("text/plain");share.putExtra(Intent.EXTRA_TEXT,active().getUrl());startActivity(Intent.createChooser(share,"Share page"));break;
+   case 8:toggleDesktop();break;case 9:pictureInPicture();break;
+  }
+ }).show();
+ }
+ void toggleDesktop(){
+  WebSettings w=active().getSettings();boolean enabled=!prefs.getBoolean("desktop",false);
+  prefs.edit().putBoolean("desktop",enabled).apply();String agent=WebSettings.getDefaultUserAgent(this);
+  w.setUserAgentString(enabled?agent.replace("Mobile","").replace("Android","X11; Linux x86_64"):agent);
+  active().reload();Toast.makeText(this,enabled?"Desktop mode enabled":"Mobile mode enabled",Toast.LENGTH_SHORT).show();
+ }
+ void pictureInPicture(){
+  if(Build.VERSION.SDK_INT>=26){try{enterPictureInPictureMode(new android.app.PictureInPictureParams.Builder().build());}
+   catch(Exception e){dialog("Picture in picture","This device or page does not support picture in picture.");}}
+ }
+ class MhDialogBuilder extends AlertDialog.Builder {
+ MhDialogBuilder(){super(BrowserActivity.this,android.R.style.Theme_Material_Dialog_Alert);}
+ @Override public AlertDialog show(){AlertDialog d=super.show();styleDialog(d);return d;}
+}
+void styleDialog(AlertDialog d){
+ if(d.getWindow()!=null)d.getWindow().setBackgroundDrawable(grad(0xff17324e,0xff10243c,18));
+ if(d.getButton(-1)!=null)d.getButton(-1).setTextColor(0xff6ad9ff);
+ if(d.getButton(-2)!=null)d.getButton(-2).setTextColor(0xffb6c9de);
+ if(d.getButton(-3)!=null)d.getButton(-3).setTextColor(0xff6ad9ff);
+}
+AlertDialog.Builder themed(){return new MhDialogBuilder();}
  void dialog(String title,String message){themed().setTitle(title).setMessage(message).setPositiveButton("OK",null).show();}
  void settingRow(LinearLayout list,String label,String desc,Runnable act){LinearLayout c=column();c.setPadding(20,16,20,16);c.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(c,lp);c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));c.setOnClickListener(v->act.run());}
  void switchRow(LinearLayout list,String label,String desc,String pref,boolean def){LinearLayout r=row();r.setPadding(20,12,12,12);r.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(r,lp);LinearLayout c=column();r.addView(c,new LinearLayout.LayoutParams(0,-2,1));c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));Switch s=new Switch(this);s.setChecked(prefs.getBoolean(pref,def));r.addView(s);s.setOnCheckedChangeListener((b,v)->prefs.edit().putBoolean(pref,v).apply());}
@@ -216,7 +246,7 @@ public class BrowserActivity extends Activity {
   c.addView(name);c.addView(link);
   AlertDialog d=themed().setTitle(position<0?"Add shortcut":"Edit shortcut").setView(c).setNegativeButton("Cancel",null)
    .setPositiveButton("Save",null).create();
-  d.setOnShowListener(v->d.getButton(-1).setOnClickListener(w->{
+  d.setOnShowListener(v->{styleDialog(d);d.getButton(-1).setOnClickListener(w->{
    String nm=name.getText().toString().trim(),u=link.getText().toString().trim();
    if(nm.isEmpty()){name.setError("Enter a name");return;}
    if(!u.startsWith("https://")&&!u.startsWith("http://")){link.setError("Enter an HTTP or HTTPS URL");return;}
@@ -224,7 +254,7 @@ public class BrowserActivity extends Activity {
    try{JSONArray a=shortcuts();JSONObject o=new JSONObject();o.put("name",nm);o.put("url",u);
     if(position<0)a.put(o);else a.put(position,o);storeArray("shortcuts",a);d.dismiss();display();
    }catch(Exception e){link.setError("Could not save shortcut");}
-  }));d.show();
+  });});d.show();
  }
  void addHistory(String u){
   if(u==null||!u.startsWith("http"))return;JSONArray old=readArray("history"),a=new JSONArray();a.put(u);
@@ -263,11 +293,24 @@ public class BrowserActivity extends Activity {
   switchRow(l,"Desktop mode by default","Request desktop user agent for new tabs","desktop",false);
   settingRow(l,"Home page","MH Browser start page",()->dialog("Home page","MH Browser start page is the default home page."));
  }
+ void siteSettings(){
+  head.removeAllViews();body.removeAllViews();sectionHeader("Site settings",this::settings);
+  LinearLayout l=settingContent();
+  switchRow(l,"Allow website location","Requires Android location permission; websites must ask","location",false);
+  switchRow(l,"Allow JavaScript popups","Blocked by default","popups",false);
+  settingRow(l,"Location accuracy","Uses Android location, not public IP location",()->dialog("Location","Device location and public IP geolocation are separate."));
+ }
+ void multiWindow(){
+  themed().setTitle("Multi-window").setItems(new String[]{"Android split screen","Picture in picture"},(d,i)->{
+   if(i==0)dialog("Split screen","Open Android Recent Apps, tap MH Browser's icon, and select Split screen if available.");
+   else pictureInPicture();
+  }).show();
+ }
  void advanced(){
   head.removeAllViews();body.removeAllViews();sectionHeader("Advanced",this::settings);
   LinearLayout l=settingContent();
   switchRow(l,"Enable zoom","Pinch to zoom on websites","zoom",true);
-  switchRow(l,"Allow third-party cookies","Control is in Privacy & Security","dummy",false);
+
   settingRow(l,"Network diagnostics","View active connection type",this::network);
   settingRow(l,"Clear history","Remove saved visited-page list",()->themed().setTitle("Clear history?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->storeArray("history",new JSONArray())).show());
   settingRow(l,"Browser engine","Android System WebView",()->dialog("Browser engine","MH Browser uses the installed Android System WebView, which is Chromium-based."));
@@ -283,16 +326,16 @@ public class BrowserActivity extends Activity {
   ScrollView sc=new ScrollView(this);sc.setVerticalScrollBarEnabled(false);body.addView(sc);
   LinearLayout list=column();list.setPadding(dp(15),dp(8),dp(15),dp(20));sc.addView(list);
   TextView general=text("GENERAL",12,0xff64caff);general.setPadding(dp(8),dp(15),0,dp(13));list.addView(general);
-  settingRow(list,"⚙  General","Google search • appearance • home page",()->dialog("General","MH Browser V1.0 uses Google Search. More customization is planned."));
+  settingRow(list,"⚙  General","Search, JavaScript, images and startup",this::general);
   settingRow(list,"◉  Privacy & Security","Tracker protection, cookies, safe browsing",()->privacy());
   settingRow(list,"⇄  Proxy settings","HTTP / HTTPS / SOCKS5 configuration",this::proxy);
-  settingRow(list,"▣  Site settings","Location, permissions, notifications",()->dialog("Site settings","Location requests are currently blocked. Per-site permissions are not yet implemented."));
-  settingRow(list,"↓  Downloads","Files and download location",()->dialog("Downloads","Download manager is not yet implemented."));
+  settingRow(list,"▣  Site settings","Location access and website permissions",this::siteSettings);
+  settingRow(list,"↓  Downloads","Android Download Manager",this::downloads);
   TextView more=text("BROWSING & DISPLAY",12,0xff64caff);more.setPadding(dp(8),dp(22),0,dp(13));list.addView(more);
   switchRow(list,"♫  Background playback","Keep media playing when minimized (site dependent)","audio",false);
-  settingRow(list,"▤  Multi-window / Split screen","Use Android's split-screen controls",()->dialog("Multi-window","Open Android Recent Apps and select Split screen if supported."));
-  settingRow(list,"⊘  Do Not Track","Advisory request; websites can ignore it",()->dialog("Do Not Track","Do Not Track is an advisory preference, not a guarantee of anonymity."));
-  settingRow(list,"⚙  Advanced","Browser information and experimental options",()->dialog("Advanced","Additional advanced options are under development."));
+  settingRow(list,"▤  Multi-window / Split screen","Android split screen or picture in picture",this::multiWindow);
+  switchRow(list,"⊘  Do Not Track","Send DNT: 1 on direct page navigation","dnt",false);
+  settingRow(list,"⚙  Advanced","Zoom, network and history controls",this::advanced);
   settingRow(list,"ⓘ  About MH Browser","Version 1.0 • Android",()->dialog("MH Browser","V1.0 test build. Advanced privacy, proxy routing, and background media need further work."));
  }
  void privacy(){
