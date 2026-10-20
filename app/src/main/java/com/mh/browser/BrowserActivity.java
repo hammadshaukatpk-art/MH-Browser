@@ -1044,7 +1044,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "var embeds=document.querySelectorAll('iframe[src],embed[src],object[data]');"+
    "var hasEmbed=false;embeds.forEach(function(el){var u=el.getAttribute('src')||el.getAttribute('data')||'';"+
    "if(/(youtube\\.com\\/embed|youtu\\.be\\/|player\\.vimeo\\.com|dailymotion\\.com\\/embed|facebook\\.com\\/plugins\\/video|instagram\\.com\\/reel|tiktok\\.com\\/embed|soundcloud\\.com\\/player|streamable\\.com\\/e\\/|\\/embed\\/|\\/player\\/)/i.test(u))hasEmbed=true;});"+
-   "var meta=document.querySelector('meta[property=\\\"og:video\\\"],meta[property=\\\"og:audio\\\"],meta[name=\\\"twitter:player\\\"]');"+
+   "var meta=Array.from(document.querySelectorAll('meta[property],meta[name]')).some(function(m){return /^(og:video|og:audio|twitter:player)(:|$)/.test(m.getAttribute('property')||m.getAttribute('name')||'');});"+
    "if((els.length||hasEmbed||meta)&&!found){found=true;MHMedia.found();}"+
    "els.forEach(function(el){if(el.dataset.mhTracked)return;el.dataset.mhTracked='1';"+
    "el.addEventListener('play',function(){MHMedia.playing();});"+
@@ -1052,7 +1052,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "el.addEventListener('pause',function(){MHMedia.stopped();});});"+
    "}catch(e){}}"+
    "window.mhMediaScan=scan;scan();"+
-   "new MutationObserver(function(){scan();}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','poster']});"+
+   "var scanScheduled=false;function queueScan(){if(scanScheduled)return;scanScheduled=true;setTimeout(function(){scanScheduled=false;scan();},220);}"+
+   "new MutationObserver(queueScan).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src','poster']});"+
    "document.addEventListener('play',function(e){if(e.target&&/^(VIDEO|AUDIO)$/.test(e.target.tagName))MHMedia.playing();},true);"+
    "window.addEventListener('popstate',scan);"+
    "setInterval(scan,2200);"+
