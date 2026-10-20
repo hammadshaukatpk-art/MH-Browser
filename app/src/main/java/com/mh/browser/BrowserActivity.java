@@ -237,7 +237,7 @@ public class BrowserActivity extends Activity {
     try{
      Intent app=new Intent(Intent.ACTION_VIEW,target);
      app.addCategory(Intent.CATEGORY_BROWSABLE);
-     if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+     startActivity(app);return true;
     }catch(Exception ignored){}
     view.loadUrl("https://www.facebook.com/");
     Toast.makeText(BrowserActivity.this,"Facebook app link opened in Facebook website",Toast.LENGTH_SHORT).show();
@@ -248,7 +248,7 @@ public class BrowserActivity extends Activity {
      Intent app=Intent.parseUri(target.toString(),Intent.URI_INTENT_SCHEME);
      app.addCategory(Intent.CATEGORY_BROWSABLE);
      app.setComponent(null);app.setSelector(null);
-     if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+     startActivity(app);return true;
      String fallback=app.getStringExtra("browser_fallback_url");
      if(fallback!=null&&(fallback.startsWith("https://")||fallback.startsWith("http://"))){view.loadUrl(fallback);return true;}
     }catch(Exception ignored){}
@@ -258,7 +258,7 @@ public class BrowserActivity extends Activity {
    try{
     Intent app=new Intent(Intent.ACTION_VIEW,target);
     app.addCategory(Intent.CATEGORY_BROWSABLE);
-    if(app.resolveActivity(getPackageManager())!=null){startActivity(app);return true;}
+    startActivity(app);return true;
    }catch(Exception ignored){}
    Toast.makeText(BrowserActivity.this,"No app available to open this link",Toast.LENGTH_SHORT).show();
    return true;
