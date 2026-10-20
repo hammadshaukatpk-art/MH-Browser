@@ -115,7 +115,7 @@ public class BrowserActivity extends Activity {
  });
  w.setWebViewClient(new WebViewClient(){
   @Override public void onReceivedHttpAuthRequest(WebView view,HttpAuthHandler handler,String host,String realm){
-   if(!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
+   if(prefs.getBoolean("proxyActive",false)&&host.equalsIgnoreCase(prefs.getString("proxyHost",""))&&!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
    else handler.cancel();
   }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
