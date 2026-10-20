@@ -58,11 +58,15 @@ public class MediaDownloadService extends Service {
   enqueue(context,url,choice,null,null);
  }
  public static void enqueue(Context context,String url,MediaDownloadEngine.Choice choice,String referer,String agent){
+  enqueue(context,url,choice,referer,agent,null);
+ }
+ public static void enqueue(Context context,String url,MediaDownloadEngine.Choice choice,String referer,String agent,String titleHint){
   Intent intent=new Intent(context,MediaDownloadService.class);
   intent.putExtra("url",url);intent.putExtra("label",choice.label);
   intent.putExtra("height",choice.height);intent.putExtra("audio",choice.audioFormat);
   if(referer!=null)intent.putExtra("referer",referer);
   if(agent!=null)intent.putExtra("userAgent",agent);
+  if(titleHint!=null)intent.putExtra("titleHint",titleHint);
   intent.putExtra("task",UUID.randomUUID().toString());
   if(Build.VERSION.SDK_INT>=26)context.startForegroundService(intent);
   else context.startService(intent);
@@ -184,7 +188,7 @@ public class MediaDownloadService extends Service {
   // Android requires foreground service promotion promptly after startForegroundService.
   startForeground(id,notification("MH Browser • Preparing download",choice.label,0,true,false,task,false));
   save(task,choice.label,"Preparing",0,"Connecting to media source…",null,null);
-  MediaDownloadEngine.download(getApplicationContext(),url,choice,intent.getStringExtra("referer"),intent.getStringExtra("userAgent"),control,new MediaDownloadEngine.Callback(){
+  MediaDownloadEngine.download(getApplicationContext(),url,choice,intent.getStringExtra("referer"),intent.getStringExtra("userAgent"),intent.getStringExtra("titleHint"),control,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
    @Override public void progress(int percent,String line){
     if(control.paused)return;
