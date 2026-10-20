@@ -38,7 +38,7 @@ public class BrowserActivity extends Activity {
  LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(0);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
  TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
- @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
+ @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
  if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
   String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
@@ -162,7 +162,7 @@ public class BrowserActivity extends Activity {
   TextView account=text("Google",10,WHITE);account.setGravity(Gravity.CENTER);profile.addView(account);
   String googleCookies=CookieManager.getInstance().getCookie("https://accounts.google.com/");
   boolean sessionHint=!privateOnly&&googleCookies!=null&&(googleCookies.contains("SID=")||googleCookies.contains("HSID="));
-  TextView login=text(sessionHint?"Google session":"Login Gmail",9,GRAY);login.setGravity(Gravity.CENTER);profile.addView(login);
+  TextView login=text(sessionHint?"Session saved":"Login Gmail",9,GRAY);login.setGravity(Gravity.CENTER);profile.addView(login);
   profile.setOnClickListener(v->googleAccount());
 
   if(tabs.get(index).incognito){
@@ -564,19 +564,23 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }).show());
   LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(48),1);ap.leftMargin=dp(10);all.setBackground(grad(0xff5a2b43,0xff472136,12));actions.addView(all,ap);
  }
+ void openGoogleInTab(String url){
+  createTab(privateOnly);
+  navigate(url);
+ }
  void googleAccount(){
-  if(privateOnly){
-   themed().setTitle("Google in private browsing")
-    .setMessage("Open Google sign-in inside this private browser session? This session's cookies will be cleared when the private browser closes. Google may decline sign-in in an embedded WebView.")
-    .setNegativeButton("Cancel",null)
-    .setPositiveButton("Continue",(d,n)->navigate("https://accounts.google.com/")).show();
-   return;
-  }
-  themed().setTitle("Google • Login Gmail")
-   .setMessage("Open Google sign-in inside MH Browser? Cookies and website storage will remain in this browser until you clear browsing data or sign out. Google may block sign-in in embedded browsers; MH Browser cannot override Google's security requirements.")
-   .setNegativeButton("Cancel",null)
-   .setNeutralButton("Google",(d,n)->navigate("https://www.google.com/"))
-   .setPositiveButton("Login Gmail",(d,n)->navigate("https://accounts.google.com/")).show();
+  String cookies=CookieManager.getInstance().getCookie("https://accounts.google.com/");
+  boolean hasCookies=cookies!=null&&(cookies.contains("SID=")||cookies.contains("HSID="));
+  String title=hasCookies?"Google • Saved browser session":"Google • Login Gmail";
+  String[] options={"Login Gmail","Open Gmail","Open YouTube","Google Account"};
+  themed().setTitle(title)
+   .setMessage(privateOnly?
+    "Google pages open inside the private MH Browser session. Private cookies are deleted when this session closes. Google may reject embedded browser sign-in.":
+    "Google pages open inside MH Browser. Website cookies and login sessions are saved locally until you sign out or clear browsing data. Google may reject sign-in inside Android WebView; an existing cookie does not confirm a valid login.")
+   .setItems(options,(d,i)->{
+    String[] links={"https://accounts.google.com/","https://mail.google.com/","https://www.youtube.com/","https://myaccount.google.com/"};
+    openGoogleInTab(links[i]);
+   }).setNegativeButton("Close",null).show();
  }
  void bookmarks(){
   showingSettings=true;screen=7;head.removeAllViews();body.removeAllViews();sectionHeader("Bookmarks",this::display);
