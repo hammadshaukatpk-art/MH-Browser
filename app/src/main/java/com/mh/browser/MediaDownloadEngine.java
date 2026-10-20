@@ -44,7 +44,6 @@ public final class MediaDownloadEngine {
   new Thread(()->{
    try{
     YoutubeDL.getInstance().init(context.getApplicationContext());
-    FFmpeg.getInstance().init(context.getApplicationContext());
     YoutubeDLRequest infoRequest=new YoutubeDLRequest(url);
     infoRequest.addOption("--no-playlist");
     VideoInfo info=YoutubeDL.getInstance().getInfo(infoRequest);
