@@ -14,6 +14,7 @@ import android.widget.Toast;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
+import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.ContentBlocking;
 import java.util.ArrayList;
@@ -94,7 +95,8 @@ public final class GeckoBrowserActivity extends Activity {
   address.clearFocus();
  }
  private void newTab(String url){
-  GeckoSession session=new GeckoSession();
+  GeckoSession session=new GeckoSession(new GeckoSessionSettings.Builder()
+   .useTrackingProtection(prefs.getBoolean("adBlocker",true)).build());
   session.setContentDelegate(new GeckoSession.ContentDelegate(){});
   session.setNavigationDelegate(new GeckoSession.NavigationDelegate(){
    @Override public void onLocationChange(GeckoSession s,String location,
@@ -114,6 +116,7 @@ public final class GeckoBrowserActivity extends Activity {
  }
  private void select(int index){
   if(index<0||index>=tabs.size())return;
+  if(view.getSession()!=null)view.releaseSession();
   selected=index;view.setSession(current());
   canBack=false;canForward=false;
  }
