@@ -55,7 +55,21 @@ jobs:
           rules=set()
           for source in ('/tmp/mh-easylist','/tmp/mh-easyprivacy'):
               for raw in Path(source).read_text(encoding='utf-8').splitlines():
-                  if not raw.startswith('||') or raw.startswith('@@') or '
+                  if not raw.startswith('||') or raw.startswith('@@') or '$' in raw:
+                      continue
+                  m=re.match(r'^\|\|([a-z0-9.-]+)(?:\^|/)([^*|^~]*)(?:[|^].*)?$',raw.lower())
+                  if not m: continue
+                  host,path=m.groups()
+                  path=path.lstrip('/')
+                  if len(host)<4 or '.' not in host or len(path)<4: continue
+                  if any(c in path for c in ('*','[',']','\\',' ')): continue
+                  rules.add(host+'|'+path)
+          if len(rules)<300:
+              raise SystemExit('URL ad filter list unexpectedly small')
+          Path('app/src/main/assets/ad_filters.txt').write_text('\n'.join(sorted(rules))+'\n',encoding='utf-8')
+          print('Bundled',len(rules),'host/path ad filter rules')
+          PY
+      - name: Bundle current stable yt-dlp extractor
         run: |
           mkdir -p app/src/main/res/raw
           curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
