@@ -21,6 +21,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Bundle current stable yt-dlp extractor
+        run: |
+          mkdir -p app/src/main/res/raw
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" \
+            --output app/src/main/res/raw/ytdlp
+          test "$(wc -c < app/src/main/res/raw/ytdlp)" -gt 1000000
+          echo "Bundled current stable yt-dlp extractor ($(wc -c < app/src/main/res/raw/ytdlp) bytes)"
       - run: gradle :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
@@ -33,9 +41,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-playback"
+          TAG="v1.0-media-20261020-autofix"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Playback Fix" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Adds a built-in player, tap-to-play completion notifications, Android-friendly format preference and faster format lookup. Real-device testing is still required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Automatic Media Engine" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Bundles the current stable yt-dlp extractor at build time, checks for extractor updates inside the app, uses one notification per download, and offers instant format choices. Real-device testing is still required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
