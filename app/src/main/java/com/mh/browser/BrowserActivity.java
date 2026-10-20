@@ -34,6 +34,7 @@ public class BrowserActivity extends Activity {
  final LruCache<String,Bitmap> shortcutIconCache=new LruCache<>(24);
  final Map<String,java.util.List<MediaDownloadEngine.Choice>> mediaFormatCache=new HashMap<>();
  final Map<String,String> mediaTitleCache=new HashMap<>();
+ final Map<String,JSONArray> directMediaCache=new HashMap<>();
  final Set<String> mediaInspecting=new HashSet<>();
  final Handler downloadUiHandler=new Handler(Looper.getMainLooper());
  final Map<String,TextView> downloadStatusViews=new HashMap<>();
@@ -86,7 +87,13 @@ public class BrowserActivity extends Activity {
  void signalMediaFound(WebView w){
   if(tabs.isEmpty()||w!=active())return;
   mediaAvailable=true;updateMediaOverlay();
+  MediaDownloadEngine.warmup(getApplicationContext());
   String u=w.getUrl();if(isMediaPage(u))prefetchMediaFormats(u);
+  if(u!=null&&u.startsWith("http"))w.evaluateJavascript(mediaSourceScript(),raw->{
+   if(!u.equals(w.getUrl()))return;
+   JSONArray direct=parseMediaSources(raw);
+   if(direct.length()>0)directMediaCache.put(u,direct);
+  });
  }
  void prefetchMediaFormats(String u){inspectFormatsCached(u,null);}
  void inspectFormatsCached(String u,MediaFormatListener listener){
@@ -804,16 +811,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinearLayout words=column();words.setPadding(dp(12),0,0,0);heading.addView(words,new LinearLayout.LayoutParams(0,-2,1));
   TextView title=text("Media Downloader",20,WHITE);title.setTypeface(null,Typeface.BOLD);words.addView(title);
   words.addView(text("Video quality  •  Audio formats",12,GRAY));
-  TextView state=text("Checking available media formats…",13,0xffa7c7e4);
+  TextView state=text("Choose a format below to download.",13,0xffa7c7e4);
   state.setPadding(dp(12),dp(12),dp(12),dp(12));
   state.setBackground(grad(0xff1b3a57,0xff112943,12));layout.addView(state);
-  ProgressBar loading=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
-  loading.setIndeterminate(true);
-  LinearLayout.LayoutParams progressParams=new LinearLayout.LayoutParams(-1,dp(4));progressParams.topMargin=dp(9);
-  layout.addView(loading,progressParams);
   LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(-1,-2);op.topMargin=dp(12);layout.addView(options,op);
+  LinearLayout directOptions=column();options.addView(directOptions);
   LinearLayout quickOptions=column();options.addView(quickOptions);
-  state.setText("Choose a format now. Checking exact available qualities in background…");
+  state.setText("Choose a quality immediately. Exact available resolutions update automatically.");
   java.util.List<MediaDownloadEngine.Choice> quickChoices=new ArrayList<>();
   quickChoices.add(new MediaDownloadEngine.Choice("Video • best available",0,null));
   quickChoices.add(new MediaDownloadEngine.Choice("Video • up to 1080p",1080,null));
@@ -826,21 +830,21 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   dialog.show();styleDialog(dialog);
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
    dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),Math.min(dp(680),(int)(m.heightPixels*0.82f)));}
-  addFormatChoices(quickOptions,initialUrl,quickChoices,dialog);
+  addFormatChoices(quickOptions,initialUrl,mediaFormatCache.containsKey(initialUrl)?mediaFormatCache.get(initialUrl):quickChoices,dialog);
+  JSONArray readyDirect=directMediaCache.get(initialUrl);
+  if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
   // Start lookup immediately using the current permalink; DOM scanning is independent.
   // This removes two sequential WebView JavaScript round trips from the critical path.
   inspectFormatsCached(initialUrl,new MediaFormatListener(){
    @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
     if(!dialog.isShowing())return;
-    loading.setVisibility(View.GONE);
     state.setText("Available formats for: "+mediaTitle);
     quickOptions.removeAllViews();
     addFormatChoices(quickOptions,initialUrl,choices,dialog);
    }
    @Override public void failed(String error){
     if(!dialog.isShowing())return;
-    loading.setVisibility(View.GONE);
-    state.setText("Exact format lookup unavailable. Quick download choices remain available. "+error);
+    state.setText("Quick quality choices remain available. Exact lookup: "+error);
     settingRow(options,"↻  Retry format detection","Check available video/audio formats again",()->{
      mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
      dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
@@ -852,11 +856,27 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if(!dialog.isShowing())return;
    JSONArray direct=parseMediaSources(sourceRaw);
    if(direct.length()>0){
-    TextView label=text("DIRECT MEDIA FILES",12,0xff74d8ff);
-    label.setPadding(dp(8),dp(10),0,dp(8));options.addView(label);
-    settingRow(options,"↓  Save original media","Available direct file sources: "+direct.length(),()->directMediaSources(direct));
+    directMediaCache.put(initialUrl,direct);
+    showDirectChoices(directOptions,direct,dialog);
    }
   });
+ }
+ void showDirectChoices(LinearLayout container,JSONArray direct,AlertDialog dialog){
+  container.removeAllViews();
+  if(direct==null||direct.length()==0)return;
+  TextView heading=text("INSTANT DIRECT MEDIA • NO EXTRACTION",12,0xff74d8ff);
+  heading.setPadding(dp(8),dp(12),0,dp(8));container.addView(heading);
+  for(int i=0;i<direct.length();i++){
+   JSONObject source=direct.optJSONObject(i);if(source==null)continue;
+   String link=source.optString("url"),mime=source.optString("type");
+   String kind=source.optString("kind","Video"),label=source.optString("label");
+   if(link.isEmpty())continue;
+   String display="↓  "+kind+(label.isEmpty()?" • Original quality":" • "+label);
+   settingRow(container,display,"Start direct file download without media extraction",()->{
+    if(dialog.isShowing())dialog.dismiss();
+    startDownload(link,URLUtil.guessFileName(link,null,mime),mime);
+   });
+  }
  }
  void addFormatChoices(LinearLayout options,String url,java.util.List<MediaDownloadEngine.Choice> choices,AlertDialog dialog){
   if(choices==null||choices.isEmpty())return;
