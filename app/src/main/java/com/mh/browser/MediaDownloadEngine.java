@@ -15,6 +15,11 @@ import com.yausername.ffmpeg.FFmpeg;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
+import java.io.BufferedReader;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -31,6 +36,9 @@ import java.util.UUID;
 /** Inspects public, unprotected media URLs and downloads user-selected formats. */
 public final class MediaDownloadEngine {
  private MediaDownloadEngine(){}
+ // A single in-flight extractor run per video. The download worker can reuse
+ // the prefetch rather than launching a second costly yt-dlp extraction.
+ private static final ConcurrentHashMap<String,CountDownLatch> INSPECT_IN_FLIGHT=new ConcurrentHashMap<>();
  public static final class Choice {
   public final String label;
   public final int height;
@@ -50,12 +58,33 @@ public final class MediaDownloadEngine {
    boolean acquired=false;
    try{
     MediaEngineUpdater.acquireUse(context);acquired=true;
-    YoutubeDLRequest infoRequest=new YoutubeDLRequest(url);
-    infoRequest.addOption("--no-playlist");
-    infoRequest.addOption("--dump-single-json");
-    // Pre-extract the stream URLs while the video is playing and reuse the
-    // complete yt-dlp info JSON after the user picks a format.
-    String raw=YoutubeDL.getInstance().execute(infoRequest).getOut().trim();
+    File prepared=findCachedInfo(context,url);
+    String raw;
+    if(prepared!=null){
+     raw=readCachedInfo(prepared);
+    }else{
+     CountDownLatch pending=new CountDownLatch(1);
+     CountDownLatch existing=INSPECT_IN_FLIGHT.putIfAbsent(url,pending);
+     if(existing!=null){
+      existing.await(30,TimeUnit.SECONDS);
+      prepared=findCachedInfo(context,url);
+      if(prepared==null)throw new IllegalStateException("Format preparation is still running. Please retry.");
+      raw=readCachedInfo(prepared);
+     }else{
+      try{
+       // Run only one metadata extraction per video, even when a download
+       // is requested while prefetch is in progress.
+       YoutubeDLRequest infoRequest=new YoutubeDLRequest(url);
+       infoRequest.addOption("--no-playlist");
+       infoRequest.addOption("--dump-single-json");
+       raw=YoutubeDL.getInstance().execute(infoRequest).getOut().trim();
+       cacheExtractedInfo(context,url,raw);
+      }finally{
+       INSPECT_IN_FLIGHT.remove(url,pending);
+       pending.countDown();
+      }
+     }
+    }
     JSONObject info=new JSONObject(raw);
     Set<Integer> heights=new HashSet<>();
     JSONArray formats=info.optJSONArray("formats");
@@ -65,7 +94,6 @@ public final class MediaDownloadEngine {
      int h=format.optInt("height",0);
      if(h>=144&&h<=4320&&!codec.equals("none")&&!codec.isEmpty())heights.add(h);
     }
-    cacheExtractedInfo(context,url,raw);
     List<Integer> sorted=new ArrayList<>(heights);
     Collections.sort(sorted,Collections.reverseOrder());
     List<Choice> choices=new ArrayList<>();
@@ -78,6 +106,25 @@ public final class MediaDownloadEngine {
    }catch(Exception ex){callback.failed("Could not inspect formats: "+safeError(ex));}
    finally{if(acquired)MediaEngineUpdater.releaseUse();}
   },"mh-media-inspect").start();
+ }
+ private static String readCachedInfo(File file)throws Exception{
+  StringBuilder data=new StringBuilder((int)Math.min(file.length(),3000000));
+  try(BufferedReader reader=new BufferedReader(new FileReader(file))){
+   char[] buf=new char[8192];int n;
+   while((n=reader.read(buf))!=-1)data.append(buf,0,n);
+  }
+  return data.toString();
+ }
+ private static File awaitPrefetchedInfo(Context context,String url)throws InterruptedException{
+  File prepared=findCachedInfo(context,url);
+  if(prepared!=null)return prepared;
+  CountDownLatch pending=INSPECT_IN_FLIGHT.get(url);
+  if(pending!=null){
+   // Reuse the already-running extraction. This wait is for that same work,
+   // not a second extraction; it may still depend on YouTube/network latency.
+   pending.await(30,TimeUnit.SECONDS);
+  }
+  return findCachedInfo(context,url);
  }
  private static final long INFO_TTL_MS=10L*60*1000;
  private static File infoPath(Context context,String url){
@@ -160,8 +207,12 @@ public final class MediaDownloadEngine {
     staging=new File(root,"mh-working-"+UUID.randomUUID());
     if(!staging.mkdirs())throw new IllegalStateException("Could not create download directory");
     File prepared=findCachedInfo(context,url);
+    if(prepared==null&&INSPECT_IN_FLIGHT.containsKey(url)){
+     callback.progress(0,"Reusing video preparation already in progress…");
+     prepared=awaitPrefetchedInfo(context,url);
+    }
     boolean cached=prepared!=null;
-    callback.progress(0,cached?"Using prepared video formats…":"Resolving media streams…");
+    callback.progress(0,cached?"Connecting to prepared video streams…":"Resolving media streams…");
     try{
      YoutubeDLRequest req=downloadRequest(url,choice,staging,prepared);
      runDownload(req,callback);
