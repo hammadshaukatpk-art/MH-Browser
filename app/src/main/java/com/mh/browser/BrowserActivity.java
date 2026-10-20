@@ -194,7 +194,7 @@ public class BrowserActivity extends Activity {
    if(prefs.getBoolean("proxyActive",false)&&host.equalsIgnoreCase(prefs.getString("proxyHost",""))&&!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
    else handler.cancel();
   }
-  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();if(isMediaPage(u)){mediaAvailable=true;updateMediaOverlay();prefetchMediaFormats(u);}}
+  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;mediaAvailable=isMediaPage(u);updateMediaOverlay();if(isMediaPage(u))prefetchMediaFormats(u);if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();if(isMediaPage(u)){mediaAvailable=true;updateMediaOverlay();prefetchMediaFormats(u);}}
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;var found=false,lastHref=location.href;function watch(){if(location.href!==lastHref){lastHref=location.href;found=false;MHMedia.pageChanged()}var media=document.querySelectorAll('video,audio');if(media.length&&!found){found=true;MHMedia.found()}media.forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){
@@ -806,44 +806,34 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   dialog.show();styleDialog(dialog);
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
    dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),Math.min(dp(680),(int)(m.heightPixels*0.82f)));}
-  String canonicalJs="(function(){try{var d=window.ytInitialPlayerResponse&&window.ytInitialPlayerResponse.videoDetails;"+
-   "if(d&&d.videoId)return 'https://www.youtube.com/watch?v='+d.videoId;"+
-   "var c=document.querySelector('link[rel=canonical]');"+
-   "if(c&&c.href&&c.href.indexOf('/watch?')>=0)return c.href;"+
-   "return location.href}catch(e){return location.href}})()";
-  web.evaluateJavascript(canonicalJs,raw->{
-   if(!dialog.isShowing())return;
-   String mediaUrl=initialUrl;
-   try{String v=new JSONArray("["+raw+"]").optString(0,initialUrl);
-    if(v.startsWith("https://")||v.startsWith("http://"))mediaUrl=v;}catch(Exception ignored){}
-   final String url=mediaUrl;
-   web.evaluateJavascript(mediaSourceScript(),sourceRaw->{
+  // Start lookup immediately using the current permalink; DOM scanning is independent.
+  // This removes two sequential WebView JavaScript round trips from the critical path.
+  inspectFormatsCached(initialUrl,new MediaFormatListener(){
+   @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
     if(!dialog.isShowing())return;
-    JSONArray direct=parseMediaSources(sourceRaw);
-    if(direct.length()>0){
-     TextView label=text("DIRECT MEDIA FILES",12,0xff74d8ff);
-     label.setPadding(dp(8),dp(10),0,dp(8));options.addView(label);
-     settingRow(options,"↓  Save original media","Available direct file sources: "+direct.length(),()->directMediaSources(direct));
-    }
-    inspectFormatsCached(url,new MediaFormatListener(){
-     @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
-      if(!dialog.isShowing())return;
-      loading.setVisibility(View.GONE);
-      state.setText("Available formats for: "+mediaTitle);
-      addFormatChoices(options,url,choices,dialog);
-     }
-     @Override public void failed(String error){
-      if(!dialog.isShowing())return;
-      loading.setVisibility(View.GONE);
-      state.setText("Format lookup unavailable. "+error);
-      if(direct.length()==0){
-       settingRow(options,"↻  Retry format detection","Check again for available video/audio formats",()->{
-        mediaFormatCache.remove(url);mediaTitleCache.remove(url);dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
-       });
-      }
-     }
+    loading.setVisibility(View.GONE);
+    state.setText("Available formats for: "+mediaTitle);
+    addFormatChoices(options,initialUrl,choices,dialog);
+   }
+   @Override public void failed(String error){
+    if(!dialog.isShowing())return;
+    loading.setVisibility(View.GONE);
+    state.setText("Format lookup unavailable. "+error);
+    settingRow(options,"↻  Retry format detection","Check available video/audio formats again",()->{
+     mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
+     dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
     });
-   });
+   }
+  });
+  // Direct media links, if any, appear without delaying the network format lookup.
+  web.evaluateJavascript(mediaSourceScript(),sourceRaw->{
+   if(!dialog.isShowing())return;
+   JSONArray direct=parseMediaSources(sourceRaw);
+   if(direct.length()>0){
+    TextView label=text("DIRECT MEDIA FILES",12,0xff74d8ff);
+    label.setPadding(dp(8),dp(10),0,dp(8));options.addView(label);
+    settingRow(options,"↓  Save original media","Available direct file sources: "+direct.length(),()->directMediaSources(direct));
+   }
   });
  }
  void addFormatChoices(LinearLayout options,String url,java.util.List<MediaDownloadEngine.Choice> choices,AlertDialog dialog){
@@ -1001,8 +991,22 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     downloadProgressViews.put(task,p);
    }
    if(status==DownloadManager.STATUS_SUCCESSFUL)card.setOnClickListener(v->{
-    try{Uri uri=id<0?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
-    catch(Exception e){dialog("Open download","No compatible app is available to open this file.");}
+    try{
+     Uri uri=id<0?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);
+     if(uri==null)throw new IllegalStateException("Missing saved file URI");
+     String mime=item.optString("mime","");
+     if(mime.isEmpty()||mime.equals("*/*")){
+      mime=getContentResolver().getType(uri);
+      if(mime==null)mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(
+       android.webkit.MimeTypeMap.getFileExtensionFromUrl(name).toLowerCase(Locale.ROOT));
+      if(mime==null)mime="video/mp4";
+     }
+     Intent play=new Intent(this,DownloadedMediaActivity.class);
+     play.setDataAndType(uri,mime);play.putExtra("name",name);
+     play.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+     play.setClipData(ClipData.newRawUri("Downloaded media",uri));
+     startActivity(play);
+    }catch(Exception e){dialog("Open download","Unable to open the saved file: "+e.getMessage());}
    });
   }
   if(shown==0){TextView empty=text("No downloads for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(8),dp(55),dp(8),dp(40));list.addView(empty);}
