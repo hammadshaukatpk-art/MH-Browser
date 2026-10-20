@@ -58,6 +58,14 @@ browser.webRequest.onBeforeRequest.addListener(details=>{
  if(adEndpoint.test(u.pathname)||domainBlocked(host)||pathBlocked(host,u.pathname+u.search))return {cancel:true};
  return {};
 },{urls:["<all_urls>"]},["blocking"]);
+// Also capture signed player URLs that have no .mp4 or .m3u8 suffix.
+browser.webRequest.onHeadersReceived.addListener(details=>{
+ if(!/^https?:/i.test(details.url)||!["media","xmlhttprequest","other"].includes(details.type))return;
+ const content=(details.responseHeaders||[]).find(x=>x.name&&x.name.toLowerCase()==="content-type");
+ const mime=content&&content.value?content.value.toLowerCase():"";
+ if(/^(video\/(mp4|webm|quicktime)|audio\/(mpeg|mp4|aac|ogg|wav)|application\/(vnd\.apple\.mpegurl|x-mpegurl))/.test(mime))
+  notify({type:"media",url:details.url,referer:details.originUrl||details.documentUrl||"",tabId:details.tabId});
+},{urls:["<all_urls>"]},["responseHeaders"]);
 browser.runtime.onMessage.addListener((message,sender)=>{
  if(!message||typeof message!=="object")return;
  if(message.type==="media"&&typeof message.url==="string")
