@@ -1,3 +1,12 @@
+## Media download engine — October 20, 2026
+- MH Browser now integrates the open-source yt-dlp Android runtime and FFmpeg to inspect public media pages for actual available resolutions and offer video download or audio extraction to MP3/M4A where supported. Video/audio streams can be merged when required.
+- The floating media download button is displayed during media playback and launches a real format inspection. For directly exposed downloadable files, Android Download Manager remains an alternative.
+- Completed engine downloads are published to Android Downloads / MH Browser using MediaStore (Android 10+), and listed alongside direct downloads in MH Browser Downloads. On Android 8/9, completed files remain in the app's private external Downloads folder and can be opened via FileProvider.
+- In Advanced settings, **Update media download engine** can fetch the latest stable yt-dlp extractor at the user's request. This is useful when a website changes its playback implementation.
+- DRM-protected media and unauthorized downloads are not supported. Websites may require login, block extraction, or change their formats. YouTube support is best effort, not guaranteed; this code has been compiled but still requires real-device testing.
+- Downloads use a background thread in the app process; keep the app running until completion. The UI displays progress but does not yet provide a persistent foreground download service or resumable downloads.
+- Additional libraries increase APK size substantially. Existing MH Browser navigation, bookmarks, tabs, history, settings and private browsing are unchanged.
+
 ## October 20, 2026 — Google entry, media button and shortcut preview
 - The Google logo now opens the real Google account sign-in URL directly in a **new MH Browser tab**, with no informational popup. This is still an Android WebView and Google can reject sign-in; Google OAuth with a registered client is required for approved native app account identity, and it does not automatically authenticate embedded Gmail or YouTube webpages.
 - The media download action is no longer squeezed into the address bar. A visible floating download action appears over an active webpage or fullscreen player when a supported HTML5 media playback event is detected. It offers only directly exposed HTTP(S) sources; segmented/DRM/YouTube streaming quality extraction and MP3 conversion are not implemented.
