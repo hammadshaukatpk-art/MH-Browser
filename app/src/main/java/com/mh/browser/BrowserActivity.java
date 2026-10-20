@@ -1411,7 +1411,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  String mediaTitleForDownload(String pageUrl){
   String title="";
   if(pageUrl!=null&&pageUrl.equals(detectedMediaPage))title=detectedMediaTitle;
+  if(title.matches("(?i)^(Video|Watch|Home|Player|Embedded Player|YouTube|Facebook|Instagram|TikTok)$"))title="";
   if(title.isEmpty()&&pageUrl!=null)title=mediaTitleCache.getOrDefault(pageUrl,"");
+  if(title.matches("(?i)^(Available formats|Video|Watch|Home|Player)$"))title="";
   if(title.isEmpty()&&!tabs.isEmpty())title=active().getTitle();
   if(title==null)return "";
   title=title.replaceFirst("(?i)\\s*[-|•]\\s*(YouTube|Facebook|Instagram|TikTok|Vimeo)\\s*$","").trim();
