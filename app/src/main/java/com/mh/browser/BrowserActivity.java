@@ -1105,15 +1105,29 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   seen.add(link);
   mediaAvailable=true;updateMediaOverlay();
   String path=media.getPath()==null?"":media.getPath().toLowerCase(Locale.ROOT);
-  if(path.endsWith(".m3u8")||path.endsWith(".mpd"))return; // adaptive streams need extraction/DRM checks
-  String kind=path.matches(".*\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
+  if(path.endsWith(".mpd"))return; // DASH may be DRM protected: do not offer raw manifest downloads
+  String kind=path.endsWith(".m3u8")?"HLS":path.matches(".*\\\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
   JSONArray direct=directMediaCache.get(page);
   if(direct==null){direct=new JSONArray();directMediaCache.put(page,direct);}
   if(direct.length()>=12)return;
   for(int i=0;i<direct.length();i++)if(link.equals(direct.optJSONObject(i).optString("url")))return;
   JSONObject o=new JSONObject();
-  try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":"video/*");o.put("label","Detected stream");direct.put(o);}
+  try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":kind.equals("HLS")?"application/vnd.apple.mpegurl":"video/*");o.put("label",kind.equals("HLS")?"Streaming playlist":"Detected stream");direct.put(o);}
   catch(Exception ignored){}
+ }
+ String embeddedMediaScript(){
+  return "(function(){var out=[],seen={};"+
+   "function add(u,label){try{u=new URL(u,location.href).href;if(!/^https?:\\/\\//i.test(u)||seen[u])return;"+
+   "seen[u]=1;out.push({url:u,kind:'Video',label:label||'Embedded player'});}catch(e){}}"+
+   "document.querySelectorAll('iframe[src]').forEach(function(f){var u=f.src||'';"+
+   "if(!u||!/^https?:\\/\\//i.test(u))return;"+
+   "var player=/\\/(embed|player|watch|video|stream)\\b/i.test(u)||"+
+   "f.hasAttribute('allowfullscreen')||/autoplay|encrypted-media/.test(f.getAttribute('allow')||'');"+
+   "if(player)add(u,'Embedded player');});"+
+   "document.querySelectorAll('meta[property],meta[name]').forEach(function(m){"+
+   "var key=m.getAttribute('property')||m.getAttribute('name')||'';"+
+   "if(/^(og:video(:url)?|twitter:player)$/.test(key))add(m.content,'Video source');});"+
+   "return JSON.stringify(out);})()";
  }
  String mediaSourceScript(){
   return "(function(){var out=[],seen={};"+
@@ -1200,6 +1214,21 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   addFormatChoices(quickOptions,initialUrl,mediaFormatCache.containsKey(initialUrl)?mediaFormatCache.get(initialUrl):quickChoices,dialog);
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
+  web.evaluateJavascript(embeddedMediaScript(),raw->{
+   if(!dialog.isShowing())return;
+   JSONArray candidates=parseMediaSources(raw);
+   if(candidates.length()==0)return;
+   TextView sub=text("EMBEDDED VIDEO PLAYERS",12,0xff74d8ff);
+   sub.setPadding(dp(8),dp(12),0,dp(8));options.addView(sub);
+   for(int i=0;i<candidates.length()&&i<6;i++){
+    JSONObject c=candidates.optJSONObject(i);if(c==null)continue;
+    String link=c.optString("url"),label=c.optString("label","Player");
+    if(link.isEmpty()||link.equals(initialUrl))continue;
+    settingRow(options,"▶  "+label,"Use the embedded player URL for format detection",()->{
+     dialog.dismiss();showMediaDownloadPanel(link,web);
+    });
+   }
+  });
   // Start lookup immediately using the current permalink; DOM scanning is independent.
   // This removes two sequential WebView JavaScript round trips from the critical path.
   inspectFormatsCached(initialUrl,new MediaFormatListener(){
@@ -1239,9 +1268,16 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    String kind=source.optString("kind","Video"),label=source.optString("label");
    if(link.isEmpty())continue;
    String display="↓  "+kind+(label.isEmpty()?" • Original quality":" • "+label);
-   settingRow(container,display,"Start direct file download without media extraction",()->{
+   settingRow(container,display,"HLS".equals(kind)?"Save an accessible, unprotected HLS stream":"Save detected direct media file",()->{
     if(dialog.isShowing())dialog.dismiss();
-    startDownload(link,URLUtil.guessFileName(link,null,mime),mime);
+    if("HLS".equals(kind)){
+     WebView w=tabs.isEmpty()?null:active();
+     String referer=w==null?null:w.getUrl();
+     String agent=w==null?null:w.getSettings().getUserAgentString();
+     MediaDownloadService.enqueue(getApplicationContext(),link,
+      new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent);
+     Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
+    }else startDownload(link,URLUtil.guessFileName(link,null,mime),mime);
    });
   }
  }
