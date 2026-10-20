@@ -111,8 +111,7 @@ public final class GeckoBrowserActivity extends Activity {
   runtime.getWebExtensionController()
    .ensureBuiltIn("resource://android/assets/mh_adblock/","mh-adblock@mh-browser")
    .accept(extension->{
-     runtime.getWebExtensionController().setMessageDelegate(extension,
-      new WebExtension.MessageDelegate(){
+     extension.setMessageDelegate(new WebExtension.MessageDelegate(){
        @Override public GeckoResult<Object> onMessage(String nativeApp,Object message,WebExtension.MessageSender sender){
         onExtensionMessage(message,sender);return GeckoResult.fromValue(null);
        }
