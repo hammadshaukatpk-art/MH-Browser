@@ -1,3 +1,9 @@
+## October 20, 2026 — Google entry, media button and shortcut preview
+- The Google logo now opens the real Google account sign-in URL directly in a **new MH Browser tab**, with no informational popup. This is still an Android WebView and Google can reject sign-in; Google OAuth with a registered client is required for approved native app account identity, and it does not automatically authenticate embedded Gmail or YouTube webpages.
+- The media download action is no longer squeezed into the address bar. A visible floating download action appears over an active webpage or fullscreen player when a supported HTML5 media playback event is detected. It offers only directly exposed HTTP(S) sources; segmented/DRM/YouTube streaming quality extraction and MP3 conversion are not implemented.
+- Custom Quick Access shortcut forms now show a live website-favicon preview after entering a valid URL. Saved shortcut tiles use the same site favicon with fallback if the icon service is unavailable.
+- Private tabs retain DOM storage within their separate WebView data directory, cleared when the private process ends. Media indicators are reset on navigation and favicon updates check their associated domain.
+
 ## October 20, 2026 — owner-requested update
 - Removed all Picture-in-Picture UI and Android support, including auto-PiP. Kept Android split-screen and normal fullscreen video.
 - Google sign-in, Gmail, YouTube and account pages are launched **inside MH Browser tabs**. The normal browser retains cookies and website storage across launches until cleared; Google may still block embedded sign-in and there is no verified Google account synchronization.
