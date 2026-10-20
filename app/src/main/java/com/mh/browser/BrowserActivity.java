@@ -394,7 +394,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(entries.length()==0){TextView empty=text("No browsing history yet",17,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(12),dp(55),dp(12),dp(40));list.addView(empty);return;}
   TextView sub=text("Select individual pages or whole periods to remove them. Private tabs are not recorded.",12,GRAY);
   sub.setPadding(dp(5),dp(6),dp(5),dp(16));list.addView(sub);
-  ArrayList<Integer> selected=new ArrayList<>();
+  ArrayList<Integer> selected=new ArrayList<>();HashMap<Integer,CheckBox> checks=new HashMap<>();
   LinkedHashMap<String,ArrayList<Integer>> groups=new LinkedHashMap<>();
   for(int i=0;i<entries.length();i++){
    JSONObject obj=entries.optJSONObject(i);long t=obj==null?0:obj.optLong("time",0);
@@ -407,13 +407,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    select.setOnClickListener(v->{
     boolean all=true;for(int n:group.getValue())if(!selected.contains(n))all=false;
     for(int n:group.getValue()){if(all)selected.remove(Integer.valueOf(n));else if(!selected.contains(n))selected.add(n);}
-    history(); // Refresh selection via the period action below
+    for(int n:group.getValue())if(checks.containsKey(n))checks.get(n).setChecked(!all);
    });
    for(int n:group.getValue()){
     JSONObject obj=entries.optJSONObject(n);String url=itemUrl(entries,n),name=itemTitle(entries,n);
     LinearLayout card=row();card.setPadding(dp(12),dp(11),dp(12),dp(11));card.setBackground(grad(0xff152e4a,0xff0d2239,14));
     LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(7);list.addView(card,cp);
-    CheckBox check=new CheckBox(this);check.setButtonTintList(android.content.res.ColorStateList.valueOf(0xff67d6ff));card.addView(check);
+    CheckBox check=new CheckBox(this);checks.put(n,check);check.setButtonTintList(android.content.res.ColorStateList.valueOf(0xff67d6ff));card.addView(check);
     check.setOnCheckedChangeListener((v,on)->{if(on){if(!selected.contains(n))selected.add(n);}else selected.remove(Integer.valueOf(n));});
     LinearLayout info=column();card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
     TextView title=text(name,14,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(title);
