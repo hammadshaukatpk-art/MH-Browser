@@ -1051,7 +1051,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "var hasEmbed=false;embeds.forEach(function(el){var u=el.getAttribute('src')||el.getAttribute('data')||'';"+
    "if(/(youtube\\.com\\/embed|youtu\\.be\\/|player\\.vimeo\\.com|dailymotion\\.com\\/embed|facebook\\.com\\/plugins\\/video|instagram\\.com\\/reel|tiktok\\.com\\/embed|soundcloud\\.com\\/player|streamable\\.com\\/e\\/|\\/embed\\/|\\/player\\/)/i.test(u))hasEmbed=true;});"+
    "var meta=Array.from(document.querySelectorAll('meta[property],meta[name]')).some(function(m){return /^(og:video|og:audio|twitter:player)(:|$)/.test(m.getAttribute('property')||m.getAttribute('name')||'');});"+
-   "var linked=!!document.querySelector('a[href$=\\\".mp4\\\"],a[href$=\\\".mp3\\\"],a[href$=\\\".webm\\\"],a[href$=\\\".m4a\\\"]');"+
+   "var linked=Array.from(document.querySelectorAll('a[href]')).some(function(a){return /\\.(mp4|webm|mp3|m4a|ogg|wav)(\\?|$)/i.test(a.href||'');});"+
    "if((els.length||hasEmbed||meta||linked)&&!found){found=true;MHMedia.found();}"+
    "els.forEach(function(el){if(el.dataset.mhTracked)return;el.dataset.mhTracked='1';"+
    "el.addEventListener('play',function(){MHMedia.playing();});"+
@@ -1121,7 +1121,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "seen[u]=1;var q=x.getAttribute('label')||x.getAttribute('res')||x.getAttribute('size')||'';"+
    "if(!q&&m.videoHeight&&m.tagName.toLowerCase()==='video')q=m.videoHeight+'p';"+
    "out.push({url:u,type:typ,kind:audio?'Audio':'Video',label:q});"+
-   "});});return JSON.stringify(out);})()";
+   "});});"+
+   "document.querySelectorAll('a[href]').forEach(function(a){var u=a.href;if(!u||seen[u]||!/^https?:\\/\\//i.test(u))return;"+
+   "var path;try{path=new URL(u).pathname.toLowerCase()}catch(e){return}"+
+   "if(!/\\.(mp4|webm|mov|m4v|mp3|m4a|aac|wav|ogg|opus|flac)$/.test(path))return;"+
+   "seen[u]=1;var audio=/\\.(mp3|m4a|aac|wav|ogg|opus|flac)$/.test(path);"+
+   "out.push({url:u,type:audio?'audio/*':'video/*',kind:audio?'Audio':'Video',label:'Direct file'});"+
+   "});return JSON.stringify(out);})()";
  }
  JSONArray parseMediaSources(String raw){
   JSONArray valid=new JSONArray();
