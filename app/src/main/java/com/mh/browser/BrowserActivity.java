@@ -107,7 +107,7 @@ public class BrowserActivity extends Activity {
     .setPositiveButton("Allow",(d,n)->cb.invoke(origin,true,false)).show());
   }
  });
- w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
+ w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
  void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
@@ -350,23 +350,120 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   for(int i=0;i<a.length()&&i<12;i++){createTab(false);String u=a.optString(i,"about:blank");if(u.startsWith("http"))navigate(u);}
   index=Math.max(0,Math.min(tabs.size()-1,prefs.getInt("selectedTab",0)));display();
  }
- void addHistory(String u){
-  if(u==null||!u.startsWith("http"))return;JSONArray old=readArray("history"),a=new JSONArray();a.put(u);
-  for(int i=0;i<old.length()&&a.length()<100;i++){String v=old.optString(i);if(!u.equals(v))a.put(v);}storeArray("history",a);
+
+ void addHistory(String url,String title){
+  if(url==null||!url.startsWith("http"))return;
+  JSONArray old=readArray("history"),out=new JSONArray();
+  JSONObject first=old.optJSONObject(0);
+  if(first!=null&&url.equals(first.optString("url"))){
+   try{first.put("title",title==null||title.trim().isEmpty()?url:title);first.put("time",System.currentTimeMillis());}catch(Exception ignored){}
+   out.put(first);for(int i=1;i<old.length()&&out.length()<500;i++)out.put(old.opt(i));
+  }else{
+   JSONObject item=new JSONObject();try{item.put("url",url);item.put("title",title==null||title.isEmpty()?url:title);item.put("time",System.currentTimeMillis());}catch(Exception ignored){}
+   out.put(item);for(int i=0;i<old.length()&&out.length()<500;i++)out.put(old.opt(i));
+  }
+  storeArray("history",out);
+ }
+ String itemUrl(JSONArray a,int i){
+  JSONObject o=a.optJSONObject(i);return o==null?a.optString(i,""):o.optString("url","");
+ }
+ String itemTitle(JSONArray a,int i){
+  JSONObject o=a.optJSONObject(i);return o==null?a.optString(i,""):o.optString("title",o.optString("url",""));
+ }
+ String historyGroup(long t){
+  if(t<=0)return "Earlier (legacy entries)";
+  Calendar now=Calendar.getInstance(),start=Calendar.getInstance();start.set(Calendar.HOUR_OF_DAY,0);start.set(Calendar.MINUTE,0);start.set(Calendar.SECOND,0);start.set(Calendar.MILLISECOND,0);
+  long today=start.getTimeInMillis();
+  if(t>=today)return "Today";
+  if(t>=today-86400000L)return "Yesterday";
+  if(t>=today-7*86400000L)return "Previous 7 days";
+  start.set(Calendar.DAY_OF_MONTH,1);if(t>=start.getTimeInMillis())return "This month";
+  start.set(Calendar.DAY_OF_YEAR,1);if(t>=start.getTimeInMillis())return "This year";
+  return "Older";
+ }
+ String friendlyUrl(String u){
+  try{Uri parsed=Uri.parse(u);String host=parsed.getHost();return (host==null?u:host.replaceFirst("^www\\.",""));}
+  catch(Exception e){return u;}
+ }
+ void clearNavigationStacks(){for(Tab tab:tabs)tab.web.clearHistory();}
+ void history(){
+  showingSettings=true;screen=6;head.removeAllViews();body.removeAllViews();sectionHeader("Browsing history",this::display);
+  JSONArray entries=readArray("history");
+  ScrollView sc=new ScrollView(this);body.addView(sc);
+  LinearLayout list=column();list.setPadding(dp(15),dp(10),dp(15),dp(25));sc.addView(list);
+  if(entries.length()==0){TextView empty=text("No browsing history yet",17,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(12),dp(55),dp(12),dp(40));list.addView(empty);return;}
+  TextView sub=text("Select individual pages or whole periods to remove them. Private tabs are not recorded.",12,GRAY);
+  sub.setPadding(dp(5),dp(6),dp(5),dp(16));list.addView(sub);
+  ArrayList<Integer> selected=new ArrayList<>();
+  LinkedHashMap<String,ArrayList<Integer>> groups=new LinkedHashMap<>();
+  for(int i=0;i<entries.length();i++){
+   JSONObject obj=entries.optJSONObject(i);long t=obj==null?0:obj.optLong("time",0);
+   String g=historyGroup(t);if(!groups.containsKey(g))groups.put(g,new ArrayList<>());groups.get(g).add(i);
+  }
+  for(Map.Entry<String,ArrayList<Integer>> group:groups.entrySet()){
+   LinearLayout heading=row();heading.setPadding(dp(5),dp(14),dp(5),dp(10));list.addView(heading);
+   TextView label=text(group.getKey(),17,0xff77d5ff);label.setTypeface(null,Typeface.BOLD);heading.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+   TextView select=text("SELECT PERIOD",11,0xffa1e9ff);heading.addView(select);
+   select.setOnClickListener(v->{
+    boolean all=true;for(int n:group.getValue())if(!selected.contains(n))all=false;
+    for(int n:group.getValue()){if(all)selected.remove(Integer.valueOf(n));else if(!selected.contains(n))selected.add(n);}
+    history(); // Refresh selection via the period action below
+   });
+   for(int n:group.getValue()){
+    JSONObject obj=entries.optJSONObject(n);String url=itemUrl(entries,n),name=itemTitle(entries,n);
+    LinearLayout card=row();card.setPadding(dp(12),dp(11),dp(12),dp(11));card.setBackground(grad(0xff152e4a,0xff0d2239,14));
+    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(7);list.addView(card,cp);
+    CheckBox check=new CheckBox(this);check.setButtonTintList(android.content.res.ColorStateList.valueOf(0xff67d6ff));card.addView(check);
+    check.setOnCheckedChangeListener((v,on)->{if(on){if(!selected.contains(n))selected.add(n);}else selected.remove(Integer.valueOf(n));});
+    LinearLayout info=column();card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+    TextView title=text(name,14,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(title);
+    TextView detail=text(friendlyUrl(url),12,GRAY);detail.setSingleLine(true);detail.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(detail);
+    if(obj!=null&&obj.optLong("time",0)>0){
+     TextView time=text(new java.text.SimpleDateFormat("MMM d, h:mm a",Locale.getDefault()).format(new Date(obj.optLong("time"))),10,0xff81a7ca);info.addView(time);
+    }
+    info.setOnClickListener(v->{display();navigate(url);});
+   }
+  }
+  LinearLayout actions=row();actions.setPadding(0,dp(18),0,0);list.addView(actions);
+  TextView remove=action("Delete selected",15,()->{
+   if(selected.isEmpty()){Toast.makeText(this,"Select history entries first",Toast.LENGTH_SHORT).show();return;}
+   themed().setTitle("Delete selected history?").setMessage(selected.size()+" visit(s) will be removed.")
+    .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,n)->{
+     JSONArray kept=new JSONArray();for(int k=0;k<entries.length();k++)if(!selected.contains(k))kept.put(entries.opt(k));
+     storeArray("history",kept);clearNavigationStacks();history();
+    }).show();
+  });remove.setBackground(grad(0xff1d547a,0xff163a59,12));actions.addView(remove,new LinearLayout.LayoutParams(0,dp(48),1));
+  TextView all=action("Clear all",15,()->themed().setTitle("Clear all browsing history?")
+   .setMessage("This also clears Back and Forward history in every open tab.")
+   .setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->{
+    storeArray("history",new JSONArray());clearNavigationStacks();history();
+   }).show());
+  LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(48),1);ap.leftMargin=dp(10);all.setBackground(grad(0xff5a2b43,0xff472136,12));actions.addView(all,ap);
  }
  void bookmarks(){
-  String current=active().getUrl();JSONArray a=readArray("bookmarks");
-  ArrayList<String> names=new ArrayList<>();names.add("+ Bookmark current page");for(int i=0;i<a.length();i++)names.add(a.optString(i));
-  themed().setTitle("Bookmarks").setItems(names.toArray(new String[0]),(d,n)->{
-   if(n==0){if(current!=null&&current.startsWith("http")){boolean exists=false;for(int i=0;i<a.length();i++)if(current.equals(a.optString(i)))exists=true;
-     if(!exists){a.put(current);storeArray("bookmarks",a);}dialog("Saved","Page added to bookmarks.");}
-     else dialog("Bookmarks","Open a website before bookmarking.");}
-   else navigate(a.optString(n-1));
-  }).setNegativeButton("Close",null).show();
- }
- void history(){
-  JSONArray a=readArray("history");String[] names=new String[a.length()];for(int i=0;i<a.length();i++)names[i]=a.optString(i);
-  themed().setTitle("History").setItems(names,(d,n)->navigate(a.optString(n))).setNeutralButton("Clear",(d,n)->{storeArray("history",new JSONArray());}).setNegativeButton("Close",null).show();
+  showingSettings=true;screen=7;head.removeAllViews();body.removeAllViews();sectionHeader("Bookmarks",this::display);
+  ScrollView sc=new ScrollView(this);body.addView(sc);
+  LinearLayout list=column();list.setPadding(dp(16),dp(12),dp(16),dp(20));sc.addView(list);
+  TextView add=action("☆  Save current page",16,()->{
+   String u=active().getUrl();if(u==null||!u.startsWith("http")){dialog("Bookmarks","Open a website first.");return;}
+   JSONArray a=readArray("bookmarks");for(int i=0;i<a.length();i++)if(u.equals(itemUrl(a,i))){Toast.makeText(this,"Already bookmarked",Toast.LENGTH_SHORT).show();return;}
+   JSONObject obj=new JSONObject();try{obj.put("url",u);obj.put("title",active().getTitle()==null?friendlyUrl(u):active().getTitle());}catch(Exception ignored){}
+   a.put(obj);storeArray("bookmarks",a);bookmarks();
+  });
+  add.setBackground(grad(0xff23557c,0xff153653,14));list.addView(add,new LinearLayout.LayoutParams(-1,dp(52)));
+  JSONArray a=readArray("bookmarks");
+  if(a.length()==0){TextView empty=text("Your saved websites will appear here.",14,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(35),0,dp(30));list.addView(empty);}
+  for(int i=0;i<a.length();i++){
+   final int n=i;String u=itemUrl(a,i);LinearLayout row=row();row.setPadding(dp(13),dp(12),dp(9),dp(12));
+   row.setBackground(grad(0xff152d49,0xff0d2239,14));LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);rp.topMargin=dp(9);list.addView(row,rp);
+   LinearLayout info=column();row.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+   TextView name=text(itemTitle(a,i),15,WHITE);name.setSingleLine(true);name.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(name);
+   info.addView(text(friendlyUrl(u),12,GRAY));info.setOnClickListener(v->{display();navigate(u);});
+   TextView del=action("×",24,()->themed().setTitle("Remove bookmark?").setMessage(itemTitle(a,n))
+    .setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,k)->{
+     JSONArray b=new JSONArray();for(int x=0;x<a.length();x++)if(x!=n)b.put(a.opt(x));storeArray("bookmarks",b);bookmarks();
+    }).show());row.addView(del,new LinearLayout.LayoutParams(dp(45),dp(46)));
+  }
  }
  void network(){
   String type="Not connected";
@@ -417,7 +514,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   switchRow(l,"Enable zoom","Pinch to zoom on websites","zoom",true);
 
   settingRow(l,"Network diagnostics","View active connection type",this::network);
-  settingRow(l,"Clear history","Remove saved visited-page list",()->themed().setTitle("Clear history?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->storeArray("history",new JSONArray())).show());
+  settingRow(l,"Browsing history","View and delete visits by date",this::history);
   settingRow(l,"Browser engine","Android System WebView",()->dialog("Browser engine","MH Browser uses the installed Android System WebView, which is Chromium-based."));
  }
  void sectionHeader(String label,Runnable back){LinearLayout r=row();r.setPadding(dp(10),dp(10),dp(12),dp(10));head.addView(r);r.addView(action("‹",28,back),new LinearLayout.LayoutParams(dp(48),dp(45)));TextView t=text(label,22,WHITE);t.setTypeface(null,Typeface.BOLD);r.addView(t);}
@@ -453,7 +550,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   switchRow(list,"Block third-party cookies","Takes effect when opening a new tab","blockCookies",true);
   settingRow(list,"Safe Browsing","Android WebView Safe Browsing is enabled",()->dialog("Safe Browsing","Helps protect against known unsafe sites."));
   settingRow(list,"HTTPS protection","Mixed HTTP content blocked on HTTPS pages",()->dialog("HTTPS","Connections are protected by HTTPS when supported. This does not hide your identity or IP address."));
-  settingRow(list,"Clear browsing data","Delete cookies, cache and web storage",()->themed().setTitle("Clear browsing data?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->{CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();for(Tab t:tabs)t.web.clearCache(true);prefs.edit().remove("lastUrl").apply();}).show());
+  settingRow(list,"Clear browsing data","Delete cookies, history, cache and web storage",()->themed().setTitle("Clear browsing data?").setNegativeButton("Cancel",null).setPositiveButton("Clear",(d,n)->{CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();for(Tab t:tabs)t.web.clearCache(true);storeArray("history",new JSONArray());clearNavigationStacks();prefs.edit().remove("lastUrl").apply();}).show());
   settingRow(list,"Private browsing limitations","Incognito isolation is not yet production-ready",()->dialog("Incognito","Current private tabs may share site cookies with normal tabs. Do not use this preview for sensitive private sessions."));
  }
 
@@ -489,7 +586,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  @Override public void onBackPressed(){
   if(fullscreenVideo!=null){hideVideo();return;}
-  if(screen>=2){settings();return;}if(screen==1){display();return;}
+  if(screen==6||screen==7){display();return;}if(screen>=2){settings();return;}if(screen==1){display();return;}
   if(active().canGoBack()){active().goBack();return;}
   if(!"about:blank".equals(active().getUrl())){navigate("about:blank");return;}
   themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
