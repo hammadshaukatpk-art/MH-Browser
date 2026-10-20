@@ -134,12 +134,18 @@ public class BrowserActivity extends Activity {
  void home(){
   ScrollView sc=new ScrollView(this);sc.setFillViewport(true);sc.setVerticalScrollBarEnabled(false);body.addView(sc);
   LinearLayout c=column();c.setPadding(dp(19),dp(20),dp(19),dp(20));sc.addView(c);
-  LinearLayout brand=row();brand.setGravity(Gravity.CENTER);c.addView(brand);
+  LinearLayout brand=row();brand.setGravity(Gravity.CENTER_VERTICAL);c.addView(brand);
   ImageView logo=new ImageView(this);logo.setImageResource(com.mh.browser.R.drawable.app_logo);
   brand.addView(logo,new LinearLayout.LayoutParams(dp(70),dp(70)));
-  LinearLayout brandWords=column();brandWords.setPadding(dp(12),0,0,0);brand.addView(brandWords);
-  TextView title=text(tabs.get(index).incognito?"Private Browsing":"MH Browser",26,WHITE);title.setTypeface(null,Typeface.BOLD);brandWords.addView(title);
+  LinearLayout brandWords=column();brandWords.setPadding(dp(10),0,0,0);brand.addView(brandWords,new LinearLayout.LayoutParams(0,-2,1));
+  TextView title=text(tabs.get(index).incognito?"Private Browsing":"MH Browser",23,WHITE);title.setTypeface(null,Typeface.BOLD);brandWords.addView(title);
   brandWords.addView(text("Fast  •  Private  •  Secure",12,0xffa8bcd5));
+  LinearLayout profile=column();profile.setGravity(Gravity.CENTER);brand.addView(profile,new LinearLayout.LayoutParams(dp(55),dp(68)));
+  TextView google=text("G",23,0xff4285f4);google.setTypeface(null,Typeface.BOLD);google.setGravity(Gravity.CENTER);
+  google.setBackground(grad(WHITE,0xffe7f3ff,30));profile.addView(google,new LinearLayout.LayoutParams(dp(42),dp(42)));
+  TextView account=text("Account",10,GRAY);account.setGravity(Gravity.CENTER);profile.addView(account);
+  profile.setOnClickListener(v->googleAccount());
+
   if(tabs.get(index).incognito){
     TextView warning=text("Private tab preview: full cookie isolation is not yet implemented.",13,0xffffd597);
     warning.setPadding(dp(12),dp(12),dp(12),dp(12));warning.setBackground(bg(PANEL));c.addView(warning);
@@ -174,16 +180,29 @@ public class BrowserActivity extends Activity {
       item.setOnLongClickListener(v->{if(obj!=null)shortcutOptions(n);return true;});
     }
   }
-  LinearLayout hero=column();hero.setPadding(dp(20),dp(20),dp(20),dp(20));
-  hero.setBackgroundResource(R.drawable.hero_mountains);
-  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,dp(174));hp.topMargin=dp(24);c.addView(hero,hp);
-  TextView tag=text("EXPLORE MORE",11,0xff89eaff);tag.setTypeface(null,Typeface.BOLD);hero.addView(tag);
-  TextView htitle=text("Discover the World",24,WHITE);htitle.setTypeface(null,Typeface.BOLD);
-  LinearLayout.LayoutParams ht=new LinearLayout.LayoutParams(-1,-2);ht.topMargin=dp(14);hero.addView(htitle,ht);
-  hero.addView(text("Explore, search and browse with MH.",13,0xffd5e8fa));
-  TextView go=text("Explore  →",14,WHITE);go.setTypeface(null,Typeface.BOLD);
-  LinearLayout.LayoutParams gp=new LinearLayout.LayoutParams(-1,-2);gp.topMargin=dp(16);hero.addView(go,gp);
-  hero.setOnClickListener(v->navigate("https://www.google.com"));
+  FrameLayout ad=new FrameLayout(this);ad.setBackground(grad(0xff153f68,0xff0b2039,19));
+  LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,dp(177));hp.topMargin=dp(24);c.addView(ad,hp);
+  View art=new View(this){
+   android.graphics.Paint p=new android.graphics.Paint(3);
+   @Override protected void onDraw(android.graphics.Canvas canvas){
+    super.onDraw(canvas);float w=getWidth(),h=getHeight();
+    p.setStyle(android.graphics.Paint.Style.STROKE);p.setStrokeWidth(dp(2));
+    for(int i=0;i<8;i++){p.setColor(i%2==0?0x5570d5ff:0x4478a8f8);
+     canvas.drawLine(w*.58f+dp(i*14),-dp(20),w*.12f+dp(i*21),h+dp(20),p);}
+    p.setStrokeWidth(dp(3));p.setColor(0x5593d9ff);
+    canvas.drawCircle(w*.89f,h*.24f,dp(43),p);canvas.drawCircle(w*.89f,h*.24f,dp(28),p);
+    p.setStyle(android.graphics.Paint.Style.FILL);p.setColor(0x2267d9ff);
+    canvas.drawCircle(w*.9f,h*.83f,dp(58),p);
+   }
+  };ad.addView(art,new FrameLayout.LayoutParams(-1,-1));
+  LinearLayout hero=column();hero.setPadding(dp(19),dp(15),dp(15),dp(12));ad.addView(hero,new FrameLayout.LayoutParams(-1,-1));
+  TextView tag=text("ADVERTISING SPACE",11,0xff8feaff);tag.setTypeface(null,Typeface.BOLD);hero.addView(tag);
+  TextView htitle=text("Advertise with MH",23,WHITE);htitle.setTypeface(null,Typeface.BOLD);
+  LinearLayout.LayoutParams ht=new LinearLayout.LayoutParams(-1,-2);ht.topMargin=dp(11);hero.addView(htitle,ht);
+  hero.addView(text("For Advertising, Contact with Us",13,0xffd5e8fa));
+  TextView go=text("Contact with Us  →",14,0xff9beaff);go.setTypeface(null,Typeface.BOLD);
+  LinearLayout.LayoutParams gp=new LinearLayout.LayoutParams(-1,-2);gp.topMargin=dp(17);hero.addView(go,gp);
+  ad.setOnClickListener(v->dialog("Advertise with MH","Advertising contact details will be available soon."));
   LinearLayout footer=row();footer.setGravity(Gravity.CENTER);
   LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(-1,-2);fp.topMargin=dp(28);c.addView(footer,fp);
   TextView priv=text("◉  Privacy controls",13,0xffa5c8f2);footer.addView(priv,new LinearLayout.LayoutParams(0,-2,1));
@@ -477,6 +496,15 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     storeArray("history",new JSONArray());clearNavigationStacks();history();
    }).show());
   LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(48),1);ap.leftMargin=dp(10);all.setBackground(grad(0xff5a2b43,0xff472136,12));actions.addView(all,ap);
+ }
+ void googleAccount(){
+  themed().setTitle("Google account").setMessage("Sign in securely using your system browser. Google does not permit many account sign-in flows inside embedded Android WebViews. MH Browser account sync is not yet available.")
+   .setNegativeButton("Cancel",null)
+   .setNeutralButton("Google homepage",(d,n)->navigate("https://www.google.com"))
+   .setPositiveButton("Secure sign in",(d,n)->{
+    Intent intent=new Intent(Intent.ACTION_VIEW,Uri.parse("https://accounts.google.com/"));
+    try{startActivity(intent);}catch(Exception e){dialog("Google account","No compatible browser was found.");}
+   }).show();
  }
  void bookmarks(){
   showingSettings=true;screen=7;head.removeAllViews();body.removeAllViews();sectionHeader("Bookmarks",this::display);
