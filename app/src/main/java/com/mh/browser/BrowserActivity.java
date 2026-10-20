@@ -1568,6 +1568,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     p.setVisibility(status==DownloadManager.STATUS_RUNNING?View.VISIBLE:View.GONE);
     downloadProgressViews.put(task,p);
    }
+   if(id==-2&&("Preparing".equals(item.optString("state"))||"Downloading".equals(item.optString("state"))||"Paused".equals(item.optString("state")))){
+    String task=item.optString("task");boolean paused="Paused".equals(item.optString("state"));
+    TextView toggle=text(paused?"▶ Resume":"Ⅱ Pause",12,WHITE);
+    toggle.setGravity(Gravity.CENTER);toggle.setPadding(dp(10),dp(12),dp(10),dp(12));
+    toggle.setBackground(grad(0xff2373a8,0xff1a4f7a,10));card.addView(toggle);
+    toggle.setOnClickListener(v->{MediaDownloadService.setPaused(this,task,!paused);downloadUiHandler.postDelayed(this::refreshCompletedDownloadRows,300);});
+   }
    if(status==DownloadManager.STATUS_SUCCESSFUL){
     View.OnClickListener openDownloaded=v->{
      try{
