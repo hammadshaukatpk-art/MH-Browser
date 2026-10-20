@@ -322,7 +322,7 @@ public class BrowserActivity extends Activity {
  }
  @Override public void onUserLeaveHint(){
   super.onUserLeaveHint();
-  if(fullscreenVideo!=null&&Build.VERSION.SDK_INT>=26&&prefs.getBoolean("audio",false))pictureInPicture();
+  if(fullscreenVideo!=null&&Build.VERSION.SDK_INT>=26&&prefs.getBoolean("audio",true))pictureInPicture();
  }
 
  class MhDialogBuilder extends AlertDialog.Builder {
@@ -337,7 +337,15 @@ void styleDialog(AlertDialog d){
 }
 AlertDialog.Builder themed(){return new MhDialogBuilder();}
  void dialog(String title,String message){themed().setTitle(title).setMessage(message).setPositiveButton("OK",null).show();}
- void settingRow(LinearLayout list,String label,String desc,Runnable act){LinearLayout c=column();c.setPadding(20,16,20,16);c.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(c,lp);c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));c.setOnClickListener(v->act.run());}
+ void settingRow(LinearLayout list,String label,String desc,Runnable act){
+ LinearLayout card=row();card.setPadding(dp(14),dp(13),dp(13),dp(13));card.setBackground(grad(0xff17334f,0xff10253e,14));
+ LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(9);list.addView(card,lp);
+ LinearLayout content=column();card.addView(content,new LinearLayout.LayoutParams(0,-2,1));
+ TextView name=text(label,16,WHITE);name.setTypeface(null,Typeface.BOLD);content.addView(name);
+ TextView subtitle=text(desc,12,GRAY);subtitle.setPadding(0,dp(3),0,0);content.addView(subtitle);
+ TextView arrow=text("›",24,0xff6fcfff);arrow.setGravity(Gravity.CENTER);card.addView(arrow,new LinearLayout.LayoutParams(dp(28),dp(40)));
+ card.setOnClickListener(v->act.run());
+}
  void switchRow(LinearLayout list,String label,String desc,String pref,boolean def){LinearLayout r=row();r.setPadding(20,12,12,12);r.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(r,lp);LinearLayout c=column();r.addView(c,new LinearLayout.LayoutParams(0,-2,1));c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));Switch s=new Switch(this);s.setChecked(prefs.getBoolean(pref,def));r.addView(s);s.setOnCheckedChangeListener((b,v)->{
   prefs.edit().putBoolean(pref,v).apply();
   for(Tab t:tabs){WebSettings ws=t.web.getSettings();
@@ -583,7 +591,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(l,"Browsing history","View and delete visits by date",this::history);
   settingRow(l,"Browser engine","Android System WebView",()->dialog("Browser engine","MH Browser uses the installed Android System WebView, which is Chromium-based."));
  }
- void sectionHeader(String label,Runnable back){LinearLayout r=row();r.setPadding(dp(10),dp(10),dp(12),dp(10));head.addView(r);r.addView(action("‹",28,back),new LinearLayout.LayoutParams(dp(48),dp(45)));TextView t=text(label,22,WHITE);t.setTypeface(null,Typeface.BOLD);r.addView(t);}
+ void sectionHeader(String label,Runnable back){
+ LinearLayout r=row();r.setPadding(dp(10),dp(12),dp(14),dp(12));r.setBackground(grad(0xff102940,0xff071326,12));head.addView(r);
+ r.addView(action("‹",28,back),new LinearLayout.LayoutParams(dp(48),dp(45)));
+ TextView t=text(label,22,WHITE);t.setTypeface(null,Typeface.BOLD);r.addView(t);
+}
  LinearLayout settingContent(){ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout l=column();l.setPadding(dp(15),dp(10),dp(15),dp(20));sc.addView(l);return l;}
 
  void settings(){
@@ -596,12 +608,12 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   TextView general=text("GENERAL",12,0xff64caff);general.setPadding(dp(8),dp(15),0,dp(13));list.addView(general);
   settingRow(list,"⚙  General","Search, JavaScript, images and startup",this::general);
   settingRow(list,"◉  Privacy & Security","Tracker protection, cookies, safe browsing",()->privacy());
-  settingRow(list,"⇄  Proxy settings","HTTP / HTTPS / SOCKS5 configuration",this::proxy);
+  settingRow(list,"⇄  Proxy settings","HTTP proxy configuration (no SOCKS5)",this::proxy);
   settingRow(list,"▣  Site settings","Location access and website permissions",this::siteSettings);
   settingRow(list,"↓  Downloads","Android Download Manager",this::downloads);
   TextView more=text("BROWSING & DISPLAY",12,0xff64caff);more.setPadding(dp(8),dp(22),0,dp(13));list.addView(more);
-  switchRow(list,"♫  Background playback","Keep media playing when minimized (site dependent)","audio",false);
-  settingRow(list,"▤  Multi-window / Split screen","Android split screen or picture in picture",this::multiWindow);
+  switchRow(list,"♫  Background playback","Allow supported media to continue in background","audio",true);
+  settingRow(list,"▤  Multi-window / Split screen","Video-only PiP when fullscreen; Android split screen",this::multiWindow);
   switchRow(list,"⊘  Do Not Track","Send DNT: 1 on direct page navigation","dnt",false);
   settingRow(list,"⚙  Advanced","Zoom, network and history controls",this::advanced);
   settingRow(list,"ⓘ  About MH Browser","Version 1.0 • Android",()->dialog("MH Browser","V1.0 test build. Advanced privacy, proxy routing, and background media need further work."));
