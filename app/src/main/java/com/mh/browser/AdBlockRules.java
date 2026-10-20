@@ -5,20 +5,28 @@ import android.net.Uri;
 import android.webkit.WebResourceRequest;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
-/** WebView ad blocking: bundled community host rules plus safe cosmetic filters. */
+/**
+ * Request filtering with offline community ad-hosts plus curated EasyList/EasyPrivacy
+ * network rules. Filter decisions happen before the WebView fetches a resource.
+ * First-party login/video CDNs are deliberately protected against broad host blocks.
+ */
 final class AdBlockRules {
  private static volatile Set<String> blockedHosts=Collections.emptySet();
- private static final String[] CORE_AD_HOSTS={
+ private static volatile Map<String,List<String>> hostPaths=Collections.emptyMap();
+ private static final String[] AD_HOSTS={
   "doubleclick.net","googlesyndication.com","googleadservices.com",
-  "adnxs.com","adsrvr.org","criteo.com","criteo.net",
-  "taboola.com","outbrain.com","pubmatic.com","rubiconproject.com",
-  "openx.net","smartadserver.com","adform.net","casalemedia.com",
-  "contextweb.com","lijit.com","yieldmo.com","indexww.com","media.net",
+  "adnxs.com","adsrvr.org","criteo.com","criteo.net","taboola.com",
+  "outbrain.com","pubmatic.com","rubiconproject.com","openx.net",
+  "smartadserver.com","adform.net","casalemedia.com","media.net",
   "mgid.com","popads.net","popcash.net","propellerads.com",
   "exoclick.com","exosrv.com","adsterra.com","onclickads.net",
   "hilltopads.net","revcontent.com","bidvertiser.com","adroll.com",
@@ -29,76 +37,112 @@ final class AdBlockRules {
   "hotjar.com","clarity.ms","mixpanel.com","segment.io",
   "amplitude.com","quantserve.com"
  };
- // Never interfere with core media/CDN playback or login resources.
- private static final String[] MEDIA_ALLOW={
-  "googlevideo.com","youtube.com","youtu.be","ytimg.com","youtubei.googleapis.com",
-  "facebook.com","fbcdn.net","fbsbx.com","instagram.com","cdninstagram.com",
-  "tiktok.com","tiktokcdn.com","tiktokv.com","byteoversea.com",
-  "netflix.com","nflxvideo.net","nflximg.net","nflxso.net",
-  "spotify.com","scdn.co","soundcloud.com","sndcdn.com",
-  "vimeo.com","vimeocdn.com","cloudfront.net","akamaized.net",
-  "akamaihd.net","fastly.net","vercel.app"
+ // These are media/authentication delivery hosts, NOT ad blocking exemptions for
+ // all resources on the main social network websites.
+ private static final String[] MEDIA_HOSTS={
+  "googlevideo.com","ytimg.com","youtubei.googleapis.com",
+  "fbcdn.net","fbsbx.com","cdninstagram.com","tiktokcdn.com",
+  "tiktokv.com","byteoversea.com","nflxvideo.net","nflximg.net",
+  "nflxso.net","scdn.co","sndcdn.com","vimeocdn.com"
+ };
+ private static final String[] TRUSTED_SOCIAL={
+  "youtube.com","youtu.be","facebook.com","instagram.com",
+  "tiktok.com","pinterest.com","netflix.com","google.com"
  };
  private AdBlockRules(){}
- static void initialize(Context app){
+ static synchronized void initialize(Context context){
   if(!blockedHosts.isEmpty())return;
+  Set<String> hosts=new HashSet<>();
+  Map<String,List<String>> paths=new HashMap<>();
   try(BufferedReader r=new BufferedReader(new InputStreamReader(
-    app.getApplicationContext().getAssets().open("ad_hosts.txt"),"UTF-8"))){
-   Set<String> parsed=new HashSet<>();
+      context.getApplicationContext().getAssets().open("ad_hosts.txt"),"UTF-8"))){
    String line;
    while((line=r.readLine())!=null){
-    String host=line.trim().toLowerCase(Locale.ROOT);
-    if(host.length()<4||host.length()>240||host.startsWith("#")||host.contains(" ")||host.contains("/"))continue;
-    parsed.add(host);
+    String h=line.trim().toLowerCase(Locale.ROOT);
+    if(h.length()>3&&h.length()<240&&!h.startsWith("#")&&!h.contains(" ")&&!h.contains("/"))hosts.add(h);
    }
-   blockedHosts=Collections.unmodifiableSet(parsed);
-  }catch(Exception ignored){
-   // Minimal built-in rules still apply to builds without the optional asset.
-  }
+  }catch(Exception ignored){}
+  try(BufferedReader r=new BufferedReader(new InputStreamReader(
+      context.getApplicationContext().getAssets().open("ad_filters.txt"),"UTF-8"))){
+   String line;
+   while((line=r.readLine())!=null){
+    int separator=line.indexOf('|');
+    if(separator<1)continue;
+    String host=line.substring(0,separator);
+    String path=line.substring(separator+1);
+    if(host.length()>3&&path.length()>2)
+     paths.computeIfAbsent(host,k->new ArrayList<>()).add(path);
+   }
+  }catch(Exception ignored){}
+  blockedHosts=Collections.unmodifiableSet(hosts);
+  hostPaths=Collections.unmodifiableMap(paths);
  }
- private static boolean suffixMatch(String host,String[] rules){
-  if(host==null)return false;
-  for(String d:rules)if(host.equals(d)||host.endsWith("."+d))return true;
+ private static boolean matches(String host,String[] list){
+  for(String d:list)if(host.equals(d)||host.endsWith("."+d))return true;
   return false;
  }
- private static boolean bundledMatch(String host){
-  Set<String> list=blockedHosts;
-  if(list.contains(host))return true;
-  int i=host.indexOf('.');
-  while(i>=0){
-   String parent=host.substring(i+1);
-   if(list.contains(parent))return true;
-   i=host.indexOf('.',i+1);
+ private static boolean blockedDomain(String host){
+  Set<String> hosts=blockedHosts;
+  if(hosts.contains(host))return true;
+  for(int dot=host.indexOf('.');dot>=0;dot=host.indexOf('.',dot+1))
+   if(hosts.contains(host.substring(dot+1)))return true;
+  return false;
+ }
+ private static boolean blockedPath(String host,String path){
+  Map<String,List<String>> rules=hostPaths;
+  String candidate=host;
+  while(true){
+   List<String> entries=rules.get(candidate);
+   if(entries!=null)for(String token:entries)if(path.contains(token))return true;
+   int dot=candidate.indexOf('.');
+   if(dot<0)break;
+   candidate=candidate.substring(dot+1);
   }
   return false;
  }
- static boolean shouldBlock(WebResourceRequest request,boolean adBlock,boolean trackers){
-  if(request==null||request.isForMainFrame())return false;
-  Uri uri=request.getUrl();
-  if(uri==null)return false;
-  String scheme=uri.getScheme();
-  if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme))return false;
-  String host=uri.getHost();
+ static boolean shouldBlock(WebResourceRequest request,String pageUrl,boolean ads,boolean trackers){
+  if(request==null||request.isForMainFrame()||(!ads&&!trackers))return false;
+  Uri url=request.getUrl();
+  if(url==null)return false;
+  String scheme=url.getScheme();
+  if(!"http".equalsIgnoreCase(scheme)&&!"https".equalsIgnoreCase(scheme))return false;
+  String host=url.getHost();
   if(host==null)return false;
   host=host.toLowerCase(Locale.ROOT);
-  if(suffixMatch(host,MEDIA_ALLOW))return false;
-  if(trackers&&suffixMatch(host,TRACKERS))return true;
-  return adBlock&&(suffixMatch(host,CORE_AD_HOSTS)||bundledMatch(host));
+  if(matches(host,MEDIA_HOSTS))return false;
+  String pageHost=null;
+  try{pageHost=Uri.parse(pageUrl).getHost();}catch(Exception ignored){}
+  if(pageHost!=null)pageHost=pageHost.toLowerCase(Locale.ROOT);
+  // Broad hosts rules must not disable first-party sites, their login flows or players.
+  boolean firstParty=pageHost!=null&&(host.equals(pageHost)||host.endsWith("."+pageHost)||pageHost.endsWith("."+host));
+  String path=url.getEncodedPath();
+  if(path==null)path="";
+  path=path.toLowerCase(Locale.ROOT);
+  String query=url.getEncodedQuery();
+  if(query!=null&&query.length()<1000)path+="?"+query.toLowerCase(Locale.ROOT);
+  if(ads&&blockedPath(host,path))return true;
+  if(firstParty)return false;
+  if(matches(host,TRUSTED_SOCIAL))return false;
+  return (ads&&(matches(host,AD_HOSTS)||blockedDomain(host)))
+    ||(trackers&&matches(host,TRACKERS));
  }
  static String cosmeticScript(){
   return "(function(){"+
-   "var id='mh-browser-ad-css';"+
-   "var old=document.getElementById(id);"+
+   "var id='mh-browser-ad-css',old=document.getElementById(id);"+
    "if(!window.MHAdBlockEnabled){if(old)old.remove();return;}"+
    "if(old)return;"+
    "var css='"+
-    "ins.adsbygoogle, .adsbygoogle, "+
-    "[id^=\\\"google_ads_iframe\\\"], [id^=\\\"div-gpt-ad\\\"], "+
-    ".ad-banner, .ad-container, .advertisement, .advertising-banner, "+
-    "[data-ad-slot], [data-ad-client], "+
-    "ytd-display-ad-renderer, ytd-promoted-sparkles-web-renderer, "+
-    "ytd-in-feed-ad-layout-renderer, yt-ad-slot-renderer, "+
-    "#player-ads, #masthead-ad, .ytp-ad-overlay-container"+
+    "ins.adsbygoogle,.adsbygoogle,[data-ad-slot],[data-ad-client],"+
+    "[id^=\\\"google_ads_iframe\\\"],[id^=\\\"div-gpt-ad\\\"],"+
+    ".ad-banner,.ad-container,.advertisement,.advertising-banner,"+
+    ".google-auto-placed,.adsense,.adsbygoogle-noablate,"+
+    "ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer,"+
+    "ytd-in-feed-ad-layout-renderer,yt-ad-slot-renderer,"+
+    "ytd-rich-item-renderer:has(yt-ad-slot-renderer),"+
+    "ytd-item-section-renderer:has(ytd-promoted-video-renderer),"+
+    "#player-ads,#masthead-ad,.ytp-ad-overlay-container,"+
+    "[data-testid=\\\"placementTracking\\\"],"+
+    "iframe[src*=\\\"doubleclick.net\\\"],iframe[src*=\\\"googlesyndication.com\\\"]"+
    "{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;}';"+
    "var el=document.createElement('style');el.id=id;el.textContent=css;"+
    "(document.head||document.documentElement).appendChild(el);"+
