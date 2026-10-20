@@ -38,6 +38,8 @@ public class BrowserActivity extends Activity {
  final Handler downloadUiHandler=new Handler(Looper.getMainLooper());
  final Map<String,TextView> downloadStatusViews=new HashMap<>();
  final Map<String,ProgressBar> downloadProgressViews=new HashMap<>();
+ final Map<String,String> downloadRenderedStates=new HashMap<>();
+ ScrollView downloadsScrollView;
  final Runnable downloadUiTick=new Runnable(){@Override public void run(){
   if(screen!=8||isFinishing()||isDestroyed())return;
   JSONArray entries=readArray("downloads");int count=0;
@@ -45,6 +47,14 @@ public class BrowserActivity extends Activity {
    JSONObject item=entries.optJSONObject(i);if(item==null||item.optLong("id")!=-2||!downloadMatches(item.optLong("time")))continue;
    count++;
    String task=item.optString("task");
+   String currentState=item.optString("state","Pending");
+   String renderedState=downloadRenderedStates.get(task);
+   // The progress row is not clickable until a completed file has an Open action.
+   // Rebuild the entry as soon as the worker publishes the file; do not require
+   // changing Today/Week filters to create the Open button.
+   if(renderedState!=null&&!renderedState.equals(currentState)){
+    refreshCompletedDownloadRows();return;
+   }
    TextView status=downloadStatusViews.get(task);
    ProgressBar progress=downloadProgressViews.get(task);
    if(status!=null){
@@ -54,8 +64,8 @@ public class BrowserActivity extends Activity {
    if(progress!=null){progress.setProgress(item.optInt("progress",0));
     progress.setVisibility("Downloading".equals(item.optString("state"))?View.VISIBLE:View.GONE);}
   }
-  if(count!=downloadStatusViews.size()){downloads();return;}
-  downloadUiHandler.postDelayed(this,900);
+  if(count!=downloadStatusViews.size()){refreshCompletedDownloadRows();return;}
+  downloadUiHandler.postDelayed(this,500);
  }};
  final Map<String,ArrayList<MediaFormatListener>> mediaListeners=new HashMap<>();
  interface MediaFormatListener {void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices);void failed(String error);}
@@ -365,7 +375,7 @@ public class BrowserActivity extends Activity {
   LinearLayout h=row();h.setPadding(dp(15),dp(10),dp(15),dp(10));head.addView(h);
   TextView back=action("‹",28,this::display);h.addView(back,new LinearLayout.LayoutParams(dp(40),dp(44)));
   TextView title=text("Tabs  ("+tabs.size()+")",22,WHITE);title.setTypeface(null,Typeface.BOLD);h.addView(title,new LinearLayout.LayoutParams(0,-2,1));
-  ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout items=column();items.setPadding(dp(15),dp(10),dp(15),dp(16));sc.addView(items);
+  ScrollView sc=new ScrollView(this);downloadsScrollView=sc;body.addView(sc);LinearLayout items=column();items.setPadding(dp(15),dp(10),dp(15),dp(16));sc.addView(items);
   for(int i=0;i<tabs.size();i++){
     final int n=i;Tab t=tabs.get(i);LinearLayout r=row();r.setPadding(dp(15),dp(12),dp(15),dp(12));
     r.setBackground(grad(0xff183654,0xff0f243e,15));
@@ -959,6 +969,15 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(clean.isEmpty()||clean.equals("Download complete"))return "";
   return " • "+clean;
  }
+ void refreshCompletedDownloadRows(){
+  if(screen!=8||isFinishing()||isDestroyed())return;
+  int vertical=downloadsScrollView==null?0:downloadsScrollView.getScrollY();
+  downloads();
+  if(downloadsScrollView!=null){
+   ScrollView updated=downloadsScrollView;
+   updated.post(()->{if(screen==8&&downloadsScrollView==updated)updated.scrollTo(0,vertical);});
+  }
+ }
  void downloads(){
   showingSettings=true;screen=8;head.removeAllViews();body.removeAllViews();sectionHeader("Downloads",this::display);
   ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(12),dp(15),dp(22));sc.addView(list);
@@ -975,7 +994,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(39));lp.rightMargin=dp(7);filters.addView(chip,lp);
   }
   downloadUiHandler.removeCallbacks(downloadUiTick);
-  downloadStatusViews.clear();downloadProgressViews.clear();
+  downloadStatusViews.clear();downloadProgressViews.clear();downloadRenderedStates.clear();
   JSONArray a=readArray("downloads");int shown=0;String lastDate="";
   DownloadManager dm=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
   for(int i=a.length()-1;i>=0;i--){
@@ -1002,6 +1021,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    info.addView(statusLine);
    if(id==-2){
     String task=item.optString("task");downloadStatusViews.put(task,statusLine);
+    downloadRenderedStates.put(task,item.optString("state","Pending"));
     ProgressBar p=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);p.setMax(100);
     p.setProgress(item.optInt("progress",0));
     LinearLayout.LayoutParams progressLp=new LinearLayout.LayoutParams(-1,dp(5));progressLp.topMargin=dp(7);
@@ -1029,7 +1049,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
   }
   if(shown==0){TextView empty=text("No downloads for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(8),dp(55),dp(8),dp(40));list.addView(empty);}
-  downloadUiHandler.postDelayed(downloadUiTick,900);
+  downloadUiHandler.postDelayed(downloadUiTick,500);
  }
  boolean downloadMatches(long t){
   Calendar start=Calendar.getInstance();start.set(Calendar.HOUR_OF_DAY,0);start.set(Calendar.MINUTE,0);start.set(Calendar.SECOND,0);start.set(Calendar.MILLISECOND,0);
@@ -1192,7 +1212,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,i)->finish()).show();
  }
  @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",true))for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
- @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
+ @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();if(screen==8&&downloadsScrollView!=null)refreshCompletedDownloadRows();}
  @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent!=null&&intent.getBooleanExtra("openDownloads",false)){intent.removeExtra("openDownloads");downloads();}}
  @Override protected void onDestroy(){downloadUiHandler.removeCallbacks(downloadUiTick);if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();}super.onDestroy();}
 }
