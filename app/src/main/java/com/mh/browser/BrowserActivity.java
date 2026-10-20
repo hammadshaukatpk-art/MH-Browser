@@ -280,7 +280,7 @@ public class BrowserActivity extends Activity {
  }
  void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));
  // Keep the normal browser visible underneath the isolated private activity.
- overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(!prefs.getBoolean("popups",false));if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -301,6 +301,11 @@ public class BrowserActivity extends Activity {
   }
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
+  // Do not let click-to-play advertising scripts open pop-under tabs or
+  // replace the video page. Normal same-tab navigation is handled separately.
+  @Override public boolean onCreateWindow(WebView view,boolean isDialog,boolean isUserGesture,android.os.Message resultMsg){
+   return false;
+  }
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
   @Override public void onProgressChanged(WebView view,int progress){
    if(progress<20)return;
@@ -336,7 +341,11 @@ public class BrowserActivity extends Activity {
    if(!request.isForMainFrame())return false;
    Uri target=request.getUrl();String scheme=target.getScheme();
    if(scheme==null)return false;
-   if(scheme.equalsIgnoreCase("http")||scheme.equalsIgnoreCase("https")||scheme.equalsIgnoreCase("about"))return false;
+   if(scheme.equalsIgnoreCase("http")||scheme.equalsIgnoreCase("https")){
+    if(AdBlockRules.shouldBlockNavigation(target,prefs.getBoolean("adBlocker",true)))return true;
+    return false;
+   }
+   if(scheme.equalsIgnoreCase("about"))return false;
    if(scheme.equalsIgnoreCase("fb")){
     // Facebook uses fb:// to offer its app. Never hand this to Android.
     // If the public Facebook page is already loading, just suppress the app prompt.
@@ -401,6 +410,11 @@ public class BrowserActivity extends Activity {
     recoverFailedVideoHost(v,request.getUrl().toString(),detail);
   }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
+   if(AdBlockRules.shouldBlockNavigation(Uri.parse(u==null?"":u),prefs.getBoolean("adBlocker",true))){
+    v.stopLoading();
+    if(v.canGoBack())v.goBack();
+    return;
+   }
    if(u!=null)pageForFiltering.put(v,u);
    mediaInjectionStages.remove(v);
    networkMediaSeen.remove(v);
@@ -428,8 +442,10 @@ public class BrowserActivity extends Activity {
  v.evaluateJavascript(mediaObserverScript(),null);v.evaluateJavascript(mediaProbeScript(),null);applyAdCosmetics(v);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
    if(AdBlockRules.shouldBlock(req,pageForFiltering.get(v),prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
     return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
-   if(!req.isForMainFrame()&&isNetworkMediaUrl(req.getUrl()))
-    v.post(()->noteNetworkMedia(v,req.getUrl()));
+   if(!req.isForMainFrame()&&isNetworkMediaRequest(req)){
+    String referer=req.getRequestHeaders()==null?null:req.getRequestHeaders().get("Referer");
+    v.post(()->noteNetworkMedia(v,req.getUrl(),referer));
+   }
    return null;
   }});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
@@ -812,7 +828,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if("javascript".equals(pref))ws.setJavaScriptEnabled(v);
    if("images".equals(pref))ws.setLoadsImagesAutomatically(v);
    if("zoom".equals(pref)){ws.setSupportZoom(v);ws.setBuiltInZoomControls(v);}
-   if("popups".equals(pref))ws.setJavaScriptCanOpenWindowsAutomatically(v);
+   if("popups".equals(pref)){ws.setJavaScriptCanOpenWindowsAutomatically(v);ws.setSupportMultipleWindows(!v);}
    if("blockCookies".equals(pref))CookieManager.getInstance().setAcceptThirdPartyCookies(t.web,!v&&!t.incognito);
    if("adBlocker".equals(pref))applyAdCosmetics(t.web);
   }
@@ -1087,6 +1103,19 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "setInterval(scan,2200);"+
    "})()";
  }
+ boolean isNetworkMediaRequest(WebResourceRequest request){
+  if(request==null||request.isForMainFrame())return false;
+  if(isNetworkMediaUrl(request.getUrl()))return true;
+  java.util.Map<String,String> headers=request.getRequestHeaders();
+  if(headers==null)return false;
+  String accept=headers.get("Accept");
+  if(accept!=null&&(accept.contains("video/")||accept.contains("audio/")||accept.contains("application/vnd.apple.mpegurl")))return true;
+  String dest=headers.get("Sec-Fetch-Dest");
+  if("video".equalsIgnoreCase(dest)||"audio".equalsIgnoreCase(dest))return true;
+  String range=headers.get("Range");
+  String path=request.getUrl()==null?null:request.getUrl().getPath();
+  return range!=null&&path!=null&&path.matches("(?i).*/(video|audio|stream|media|file|play|hls)/.*");
+ }
  boolean isNetworkMediaUrl(Uri u){
   if(u==null)return false;
   String scheme=u.getScheme();if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme))return false;
@@ -1130,7 +1159,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
   }
  }
- void noteNetworkMedia(WebView v,Uri media){
+ void noteNetworkMedia(WebView v,Uri media){noteNetworkMedia(v,media,null);}
+ void noteNetworkMedia(WebView v,Uri media,String referer){
   if(tabs.isEmpty()||v!=active()||media==null)return;
   String page=v.getUrl(),link=media.toString();
   if(page==null||!page.startsWith("http"))return;
@@ -1148,7 +1178,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(direct.length()>=12)return;
   for(int i=0;i<direct.length();i++)if(link.equals(direct.optJSONObject(i).optString("url")))return;
   JSONObject o=new JSONObject();
-  try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":kind.equals("HLS")?"application/vnd.apple.mpegurl":"video/*");o.put("label",kind.equals("HLS")?"Streaming playlist":"Detected stream");direct.put(o);}
+  try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":kind.equals("HLS")?"application/vnd.apple.mpegurl":"video/*");o.put("label",kind.equals("HLS")?"Streaming playlist":"Detected stream");if(referer!=null&&referer.startsWith("http"))o.put("referer",referer);direct.put(o);}
   catch(Exception ignored){}
   if(activeMediaDialog!=null&&activeMediaDialog.isShowing()&&page.equals(activeMediaPage)&&activeDirectMediaOptions!=null)
    showDirectChoices(activeDirectMediaOptions,direct,activeMediaDialog);
@@ -1318,7 +1348,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(dialog.isShowing())dialog.dismiss();
     if("HLS".equals(kind)){
      WebView w=tabs.isEmpty()?null:active();
-     String referer=w==null?null:w.getUrl();
+     String referer=source.optString("referer",w==null?"":w.getUrl());
      String agent=w==null?null:w.getSettings().getUserAgentString();
      MediaDownloadService.enqueue(getApplicationContext(),link,
       new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent);
