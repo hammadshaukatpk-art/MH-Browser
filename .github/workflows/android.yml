@@ -76,6 +76,13 @@ jobs:
           Path('app/src/main/assets/ad_filters.txt').write_text('\n'.join(sorted(rules))+'\n',encoding='utf-8')
           print('Bundled',len(domain_rules),'EasyList/EasyPrivacy ad domains and',len(rules),'URL path rules')
           PY
+      - name: Package Gecko extension ad filtering lists
+        run: |
+          mkdir -p app/src/main/assets/mh_adblock
+          cat app/src/main/assets/ad_hosts.txt app/src/main/assets/ad_filter_hosts.txt | sort -u > app/src/main/assets/mh_adblock/ad_domains.txt
+          cp app/src/main/assets/ad_filters.txt app/src/main/assets/mh_adblock/ad_paths.txt
+          test "$(wc -l < app/src/main/assets/mh_adblock/ad_domains.txt)" -gt 10000
+          echo "Bundled Gecko extension domain and URL-path filters"
       - name: Bundle current stable yt-dlp extractor
         run: |
           mkdir -p app/src/main/res/raw
