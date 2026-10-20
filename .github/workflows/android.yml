@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,3 +23,24 @@ jobs:
         with:
           name: MH-Browser-v1.0-debug
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Publish direct APK downloads on GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="v1.0-media-20261020-direct"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Media Downloader" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Includes yt-dlp and FFmpeg. Device-level media download testing is still required." --latest=false
+          fi
+          for apk in app/build/outputs/apk/debug/*.apk; do
+            case "$apk" in
+              *arm64-v8a*) dest="MH-Browser-v1.0-ARM64.apk" ;;
+              *armeabi-v7a*) dest="MH-Browser-v1.0-ARMv7.apk" ;;
+              *x86_64*) dest="MH-Browser-v1.0-x86_64.apk" ;;
+              *) continue ;;
+            esac
+            cp "$apk" "$dest"
+            gh release upload "$TAG" "$dest" --clobber
+          done
