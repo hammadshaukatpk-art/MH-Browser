@@ -16,12 +16,17 @@ public final class MediaEngineUpdater {
  public static void check(Context context){
   Context app=context.getApplicationContext();
   if(System.currentTimeMillis()<nextAttempt)return;
-  new Thread(()->checkBlocking(app,false),"mh-extractor-auto-update").start();
+  new Thread(()->{
+   // Let the browser and any immediate media downloads start first.
+   try{Thread.sleep(45000L);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}
+   checkBlocking(app,false);
+  },"mh-extractor-auto-update").start();
  }
  /** Called only from media worker threads; acquires a read lock until releaseUse(). */
  public static void acquireUse(Context context)throws Exception{
   Context app=context.getApplicationContext();
-  if(System.currentTimeMillis()>=nextAttempt)checkBlocking(app,false);
+  // Never perform a GitHub update/network check on the download critical path.
+  // The extractor bundled with the APK remains usable until a background update succeeds.
   GATE.readLock().lock();
   try{YoutubeDL.getInstance().init(app);}
   catch(Exception e){GATE.readLock().unlock();throw e;}
@@ -35,7 +40,10 @@ public final class MediaEngineUpdater {
   },"mh-extractor-update").start();
  }
  private static String checkBlocking(Context context,boolean force){
-  GATE.writeLock().lock();
+  // Skip an automatic update if any extraction or download is running.
+  // Explicit user-requested updates still wait for exclusive access.
+  if(force)GATE.writeLock().lock();
+  else if(!GATE.writeLock().tryLock())return "Extractor update deferred while media is active";
   try{
    long now=System.currentTimeMillis();
    SharedPreferences prefs=context.getSharedPreferences("mh",0);
