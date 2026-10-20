@@ -100,7 +100,7 @@ public class BrowserActivity extends Activity {
     .setPositiveButton("Allow",(d,n)->cb.invoke(origin,true,false)).show());
   }
  });
- w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&address!=null)address.setText(u.equals("about:blank")?"":u);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
+ w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
  void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
@@ -240,7 +240,19 @@ void styleDialog(AlertDialog d){
 AlertDialog.Builder themed(){return new MhDialogBuilder();}
  void dialog(String title,String message){themed().setTitle(title).setMessage(message).setPositiveButton("OK",null).show();}
  void settingRow(LinearLayout list,String label,String desc,Runnable act){LinearLayout c=column();c.setPadding(20,16,20,16);c.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(c,lp);c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));c.setOnClickListener(v->act.run());}
- void switchRow(LinearLayout list,String label,String desc,String pref,boolean def){LinearLayout r=row();r.setPadding(20,12,12,12);r.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(r,lp);LinearLayout c=column();r.addView(c,new LinearLayout.LayoutParams(0,-2,1));c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));Switch s=new Switch(this);s.setChecked(prefs.getBoolean(pref,def));r.addView(s);s.setOnCheckedChangeListener((b,v)->prefs.edit().putBoolean(pref,v).apply());}
+ void switchRow(LinearLayout list,String label,String desc,String pref,boolean def){LinearLayout r=row();r.setPadding(20,12,12,12);r.setBackground(bg(PANEL));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=9;list.addView(r,lp);LinearLayout c=column();r.addView(c,new LinearLayout.LayoutParams(0,-2,1));c.addView(text(label,16,WHITE));c.addView(text(desc,12,GRAY));Switch s=new Switch(this);s.setChecked(prefs.getBoolean(pref,def));r.addView(s);s.setOnCheckedChangeListener((b,v)->{
+  prefs.edit().putBoolean(pref,v).apply();
+  for(Tab t:tabs){WebSettings ws=t.web.getSettings();
+   if("javascript".equals(pref))ws.setJavaScriptEnabled(v);
+   if("images".equals(pref))ws.setLoadsImagesAutomatically(v);
+   if("zoom".equals(pref)){ws.setSupportZoom(v);ws.setBuiltInZoomControls(v);}
+   if("popups".equals(pref))ws.setJavaScriptCanOpenWindowsAutomatically(v);
+   if("blockCookies".equals(pref))CookieManager.getInstance().setAcceptThirdPartyCookies(t.web,!v&&!t.incognito);
+  }
+  if("location".equals(pref)&&v&&checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+   requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,android.Manifest.permission.ACCESS_COARSE_LOCATION},201);
+  }
+ });}
 
 
  JSONArray readArray(String key){try{return new JSONArray(prefs.getString(key,"[]"));}catch(Exception e){return new JSONArray();}}
@@ -441,7 +453,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
    .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,i)->finish()).show();
  }
- @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false))for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
+ @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false)&&!isInPictureInPictureMode())for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
  @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
  @Override protected void onDestroy(){for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}super.onDestroy();}
 }
