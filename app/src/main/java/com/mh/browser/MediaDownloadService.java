@@ -11,10 +11,9 @@ import java.util.regex.*;
 
 public class MediaDownloadService extends Service {
  public static final String CHANNEL="mh_media_downloads_v1";
- private static final int FOREGROUND_ID=101;
  private final AtomicInteger active=new AtomicInteger();
  private NotificationManager manager;
- private long lastWrite=0;
+ private final java.util.concurrent.ConcurrentHashMap<String,Long> lastWriteByTask=new java.util.concurrent.ConcurrentHashMap<>();
  @Override public void onCreate(){
   super.onCreate();
   manager=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -42,29 +41,30 @@ public class MediaDownloadService extends Service {
   int id=notificationId(task);
   active.incrementAndGet();
   // Android requires foreground service promotion promptly after startForegroundService.
-  startForeground(FOREGROUND_ID,notification("Downloading media",choice.label,0,true,false));
-  save(task,choice.label,"Downloading",0,"Starting…",null,null);
-  manager.notify(id,notification("MH Browser • Downloading",choice.label,0,true,false));
+  startForeground(id,notification("MH Browser • Downloading",choice.label,0,true,false));
+  save(task,choice.label,"Downloading",0,"Preparing extractor…",null,null);
   MediaDownloadEngine.download(getApplicationContext(),url,choice,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
    @Override public void progress(int percent,String line){
     long now=SystemClock.elapsedRealtime();
-    if(now-lastWrite<650&&percent<100)return;
-    lastWrite=now;
+    Long last=lastWriteByTask.get(task);
+    if(last!=null&&now-last<650&&percent<100)return;
+    lastWriteByTask.put(task,now);
     String speed=extractSpeed(line);
     String info=percent+"%"+(speed.isEmpty()?"":" • "+speed);
     save(task,choice.label,"Downloading",percent,info,null,null);
     manager.notify(id,notification("MH Browser • Downloading",info,percent,true,false));
-    manager.notify(FOREGROUND_ID,notification("Downloading media",info,percent,true,false));
    }
    @Override public void completed(String name,String uri,String mime){
     save(task,name,"Completed",100,"Download complete",uri,mime);
     manager.notify(id,completedNotification(task,name,uri,mime));
+    lastWriteByTask.remove(task);
     finish(startId);
    }
    @Override public void failed(String error){
     save(task,choice.label,"Failed",0,error,null,null);
     manager.notify(id,notification("Download failed",shortText(error),0,false,true));
+    lastWriteByTask.remove(task);
     finish(startId);
    }
   });
@@ -72,7 +72,7 @@ public class MediaDownloadService extends Service {
  }
  private synchronized void finish(int startId){
   if(active.decrementAndGet()<=0){
-   stopForeground(STOP_FOREGROUND_REMOVE);
+   stopForeground(STOP_FOREGROUND_DETACH);
    stopSelfResult(startId);
   }
  }
