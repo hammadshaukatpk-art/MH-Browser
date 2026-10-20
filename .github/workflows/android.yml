@@ -21,6 +21,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Bundle community ad-blocking hosts
+        run: |
+          mkdir -p app/src/main/assets
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" \
+            --output /tmp/mh-block-hosts
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('/tmp/mh-block-hosts').read_text(encoding='utf-8')
+          names=set()
+          for line in src.splitlines():
+              line=line.partition('#')[0].strip().split()
+              if len(line)>1 and line[0] in ('0.0.0.0','127.0.0.1'):
+                  for name in line[1:]:
+                      if name not in ('localhost','localhost.localdomain','broadcasthost') and '.' in name:
+                          names.add(name.lower())
+          if len(names)<10000:
+              raise SystemExit('Ad host list unexpectedly small')
+          Path('app/src/main/assets/ad_hosts.txt').write_text('\\n'.join(sorted(names))+'\\n',encoding='utf-8')
+          print('Bundled',len(names),'community ad hosts (StevenBlack/hosts)')
+          PY
       - name: Bundle current stable yt-dlp extractor
         run: |
           mkdir -p app/src/main/res/raw
@@ -41,7 +62,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-adblock-media-v2"
+          TAG="v1.0-media-20261020-ads-media-fix"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Ad Blocker and Cross-Site Media Detection" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Adds a saved Ad Blocker switch (enabled by default), conservative ad host filtering, and expanded media detection across dynamic audio/video elements, embedded players, and direct media network requests. Retains existing WhatsApp contacts, navigation, video recovery and downloads. Keeps Facebook videos in browser, smooth navigation, branded downloads, private tabs, and YouTube downloader. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
           fi
