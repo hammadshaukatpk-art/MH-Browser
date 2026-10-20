@@ -15,6 +15,11 @@ import com.yausername.ffmpeg.FFmpeg;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -47,26 +52,99 @@ public final class MediaDownloadEngine {
     MediaEngineUpdater.acquireUse(context);acquired=true;
     YoutubeDLRequest infoRequest=new YoutubeDLRequest(url);
     infoRequest.addOption("--no-playlist");
-    VideoInfo info=YoutubeDL.getInstance().getInfo(infoRequest);
+    infoRequest.addOption("--dump-single-json");
+    // Pre-extract the stream URLs while the video is playing and reuse the
+    // complete yt-dlp info JSON after the user picks a format.
+    String raw=YoutubeDL.getInstance().execute(infoRequest).getOut().trim();
+    JSONObject info=new JSONObject(raw);
     Set<Integer> heights=new HashSet<>();
-    List<VideoFormat> formats=info.getFormats();
-    if(formats!=null)for(VideoFormat f:formats){
-     String codec=f.getVcodec();
-     int h=f.getHeight();
-     if(h>=144&&h<=4320&&codec!=null&&!codec.equals("none"))heights.add(h);
+    JSONArray formats=info.optJSONArray("formats");
+    if(formats!=null)for(int i=0;i<formats.length();i++){
+     JSONObject format=formats.optJSONObject(i);if(format==null)continue;
+     String codec=format.optString("vcodec","none");
+     int h=format.optInt("height",0);
+     if(h>=144&&h<=4320&&!codec.equals("none")&&!codec.isEmpty())heights.add(h);
     }
+    cacheExtractedInfo(context,url,raw);
     List<Integer> sorted=new ArrayList<>(heights);
     Collections.sort(sorted,Collections.reverseOrder());
     List<Choice> choices=new ArrayList<>();
     for(int h:sorted)choices.add(new Choice("Video • up to "+h+"p (MP4 preferred)",h,null));
     if(choices.isEmpty())choices.add(new Choice("Video • best available",0,null));
-    choices.add(new Choice("Audio • MP3 (192 kbps target) ",0,"mp3"));
+    choices.add(new Choice("Audio • MP3 (192 kbps target)",0,"mp3"));
     choices.add(new Choice("Audio • M4A (best available)",0,"m4a"));
-    String title=info.getTitle();
-    callback.ready(title==null?"Available formats":title,choices);
+    String title=info.optString("title","Available formats");
+    callback.ready(title.isEmpty()?"Available formats":title,choices);
    }catch(Exception ex){callback.failed("Could not inspect formats: "+safeError(ex));}
    finally{if(acquired)MediaEngineUpdater.releaseUse();}
   },"mh-media-inspect").start();
+ }
+ private static final long INFO_TTL_MS=10L*60*1000;
+ private static File infoPath(Context context,String url){
+  try{
+   byte[] digest=MessageDigest.getInstance("SHA-256").digest(url.getBytes(StandardCharsets.UTF_8));
+   StringBuilder key=new StringBuilder();
+   for(int i=0;i<16;i++)key.append(String.format(java.util.Locale.ROOT,"%02x",digest[i]&255));
+   File folder=new File(context.getCacheDir(),"mh-media-info");
+   if(!folder.exists()&&!folder.mkdirs())return null;
+   return new File(folder,key+".info.json");
+  }catch(Exception e){return null;}
+ }
+ private static File findCachedInfo(Context context,String url){
+  File f=infoPath(context,url);
+  if(f==null||!f.isFile()||f.length()<100||f.length()>3000000||
+    System.currentTimeMillis()-f.lastModified()>INFO_TTL_MS)return null;
+  return f;
+ }
+ private static void cacheExtractedInfo(Context context,String url,String raw){
+  if(raw.length()>3000000||raw.length()<100)return;
+  File file=infoPath(context,url);if(file==null)return;
+  File temp=new File(file.getParentFile(),file.getName()+".tmp-"+UUID.randomUUID());
+  try{
+   try(FileOutputStream out=new FileOutputStream(temp)){
+    out.write(raw.getBytes(StandardCharsets.UTF_8));
+   }
+   if(!temp.renameTo(file)){
+    if(file.exists())file.delete();
+    temp.renameTo(file);
+   }
+  }catch(Exception ignored){}finally{if(temp.exists())temp.delete();}
+ }
+ private static YoutubeDLRequest downloadRequest(String url,Choice choice,File staging,File cachedInfo){
+  YoutubeDLRequest req=cachedInfo==null?new YoutubeDLRequest(url):
+    new YoutubeDLRequest(Collections.<String>emptyList());
+  if(cachedInfo!=null)req.addOption("--load-info-json",cachedInfo.getAbsolutePath());
+  req.addOption("--no-playlist");
+  req.addOption("--no-mtime");
+  req.addOption("--concurrent-fragments","4");
+  req.addOption("--retries","5");
+  req.addOption("--fragment-retries","5");
+  req.addOption("--socket-timeout","25");
+  req.addOption("--restrict-filenames");
+  req.addOption("-o",new File(staging,"%(title).90B-%(id)s.%(ext)s").getAbsolutePath());
+  if(choice.audioFormat!=null){
+   req.addOption("-f","bestaudio/best");
+   req.addOption("-x");
+   req.addOption("--audio-format",choice.audioFormat);
+   if("mp3".equals(choice.audioFormat))req.addOption("--audio-quality","192K");
+  }else{
+   String quality=choice.height>0?"[height<="+choice.height+"]":"";
+   req.addOption("-f",
+    "bestvideo"+quality+"[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"+
+    "best"+quality+"[ext=mp4][vcodec^=avc1]/"+
+    "bestvideo"+quality+"[ext=mp4]+bestaudio[ext=m4a]/"+
+    "best"+quality+"[ext=mp4]/"+
+    "bestvideo"+quality+"+bestaudio/best"+quality);
+   req.addOption("--merge-output-format","mp4");
+  }
+  return req;
+ }
+ private static void runDownload(YoutubeDLRequest req,Callback callback)throws Exception{
+  String processId="mh-"+UUID.randomUUID();
+  YoutubeDL.getInstance().execute(req,processId,false,(percent,eta,line)->{
+   callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
+   return kotlin.Unit.INSTANCE;
+  });
  }
  public static void download(Context context,String url,Choice choice,Callback callback){
   new Thread(()->{
@@ -81,38 +159,21 @@ public final class MediaDownloadEngine {
     if(root==null)throw new IllegalStateException("Download storage is unavailable");
     staging=new File(root,"mh-working-"+UUID.randomUUID());
     if(!staging.mkdirs())throw new IllegalStateException("Could not create download directory");
-    YoutubeDLRequest req=new YoutubeDLRequest(url);
-    req.addOption("--no-playlist");
-    req.addOption("--no-mtime");
-    // Fragmented streams can be fetched in parallel where supported by the provider.
-    req.addOption("--concurrent-fragments","4");
-    req.addOption("--retries","5");
-    req.addOption("--fragment-retries","5");
-    req.addOption("--socket-timeout","25");
-    req.addOption("--restrict-filenames");
-    req.addOption("-o",new File(staging,"%(title).90B-%(id)s.%(ext)s").getAbsolutePath());
-    if(choice.audioFormat!=null){
-     req.addOption("-f","bestaudio/best");
-     req.addOption("-x");
-     req.addOption("--audio-format",choice.audioFormat);
-     if("mp3".equals(choice.audioFormat))req.addOption("--audio-quality","192K");
-    }else{
-     String quality=choice.height>0?"[height<="+choice.height+"]":"";
-     // Prefer AVC/H.264 video and AAC/M4A audio: most Android devices decode these reliably.
-     // Fall back only when the provider does not offer an Android-friendly format.
-     req.addOption("-f",
-      "bestvideo"+quality+"[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"+
-      "best"+quality+"[ext=mp4][vcodec^=avc1]/"+
-      "bestvideo"+quality+"[ext=mp4]+bestaudio[ext=m4a]/"+
-      "best"+quality+"[ext=mp4]/"+
-      "bestvideo"+quality+"+bestaudio/best"+quality);
-     req.addOption("--merge-output-format","mp4");
+    File prepared=findCachedInfo(context,url);
+    boolean cached=prepared!=null;
+    callback.progress(0,cached?"Using prepared video formats…":"Resolving media streams…");
+    try{
+     YoutubeDLRequest req=downloadRequest(url,choice,staging,prepared);
+     runDownload(req,callback);
+    }catch(Exception cachedError){
+     if(!cached)throw cachedError;
+     // Cached signed stream URLs can expire or be rejected by the provider.
+     // Fall back once to a fresh extraction rather than failing the download.
+     File[] partial=staging.listFiles();
+     if(partial!=null)for(File part:partial)if(part.isFile())part.delete();
+     callback.progress(0,"Refreshing expired media links…");
+     runDownload(downloadRequest(url,choice,staging,null),callback);
     }
-    String processId="mh-"+UUID.randomUUID();
-    YoutubeDL.getInstance().execute(req,processId,false,(percent,eta,line)->{
-     callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
-     return kotlin.Unit.INSTANCE;
-    });
     File[] files=staging.listFiles();
     File result=null;int bestScore=-1;
     if(files!=null)for(File f:files){
