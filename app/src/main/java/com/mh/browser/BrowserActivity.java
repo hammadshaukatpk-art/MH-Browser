@@ -1680,6 +1680,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinearLayout list=column();list.setPadding(dp(15),dp(8),dp(15),dp(20));sc.addView(list);
   TextView general=text("GENERAL",12,0xff64caff);general.setPadding(dp(8),dp(15),0,dp(13));list.addView(general);
   settingRow(list,"⚙  General","Search, JavaScript, images and startup",this::general);
+  settingRow(list,"🧪  Gecko engine preview","Experimental Firefox-based engine; current tabs remain unchanged",()->startActivity(new Intent(this,GeckoBrowserActivity.class)));
   settingRow(list,"◉  Privacy & Security","Tracker protection, cookies, safe browsing",()->privacy());
   switchRow(list,"🛡  Ad Blocker","Block known advertising domains • On by default","adBlocker",true);
   settingRow(list,"⇄  Proxy settings","HTTP, HTTPS, SOCKS5 and optional credentials",this::proxy);
