@@ -10,7 +10,7 @@ android {
 
 dependencies {
     implementation("androidx.webkit:webkit:1.13.0")
-    implementation("org.mozilla.geckoview:geckoview-nightly:160.0.20261017034010")
+    implementation("org.mozilla.geckoview:geckoview-nightly:160.0.20261013094244")
     implementation("androidx.core:core:1.13.1")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
