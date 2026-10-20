@@ -1344,13 +1344,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   LinearLayout quickOptions=column();options.addView(quickOptions);
   state.setText("Choose a quality immediately. Exact available resolutions update automatically.");
   java.util.List<MediaDownloadEngine.Choice> quickChoices=new ArrayList<>();
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • best available",0,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • up to 1080p",1080,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • up to 720p",720,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • up to 480p",480,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Video • up to 360p",360,null));
-  quickChoices.add(new MediaDownloadEngine.Choice("Audio • MP3",0,"mp3"));
-  quickChoices.add(new MediaDownloadEngine.Choice("Audio • M4A",0,"m4a"));
+  quickChoices.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
+  quickChoices.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
+  quickChoices.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
   AlertDialog dialog=themed().setView(scroll).setNegativeButton("Close",null).create();
   dialog.show();styleDialog(dialog);
   activeMediaDialog=dialog;activeDirectMediaOptions=directOptions;activeMediaPage=web.getUrl();
@@ -1368,8 +1364,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
   }else state.setText("Detecting actual video resolutions and audio formats from the playing video…");
   if(knownMediaPage&&!verifiedFormats[0]){
-   TextView hint=text("Checking video formats… Exact resolutions appear after verification.",12,GRAY);
+   TextView hint=text("Checking exact resolutions… The options below are provisional until the media is inspected.",12,GRAY);
    hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
+   addFormatChoices(quickOptions,initialUrl,quickChoices,dialog);
   }
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
