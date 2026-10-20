@@ -129,6 +129,17 @@ public final class MediaDownloadEngine {
      }
     }
     if(result==null)throw new IllegalStateException("No playable completed media file was produced");
+    // yt-dlp may sometimes report success with an audio-only file on video-only requests.
+    // Never label such a file as a successfully downloaded video.
+    if(choice.audioFormat==null){
+     android.media.MediaMetadataRetriever check=new android.media.MediaMetadataRetriever();
+     try{
+      check.setDataSource(result.getAbsolutePath());
+      String hasVideo=check.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO);
+      if(!"yes".equalsIgnoreCase(hasVideo))
+       throw new IllegalStateException("The website returned audio only, not a playable video. Try a different video quality.");
+     }finally{try{check.release();}catch(Exception ignored){}}
+    }
     String lowerName=result.getName().toLowerCase(java.util.Locale.ROOT);
     String mime=lowerName.endsWith(".mp3")?"audio/mpeg":
       lowerName.endsWith(".m4a")?"audio/mp4":
