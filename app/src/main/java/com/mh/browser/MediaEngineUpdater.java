@@ -3,37 +3,67 @@ package com.mh.browser;
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.yausername.youtubedl_android.YoutubeDL;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-/** Best-effort background extractor update checks. Updates depend on network and upstream releases. */
+/** Serializes extractor updates against active yt-dlp operations.
+ * Updates are attempted automatically and never overwrite an in-use extractor. */
 public final class MediaEngineUpdater {
  private MediaEngineUpdater(){}
- private static volatile boolean running=false;
- private static final long CHECK_INTERVAL=24L*60*60*1000;
+ private static final ReentrantReadWriteLock GATE=new ReentrantReadWriteLock(true);
+ private static final long DAY=24L*60*60*1000,RETRY=60L*60*1000;
+ private static volatile long nextAttempt=0;
  public interface Listener{void finished(String status);}
- public static void check(Context context){update(context,false,null);}
- public static synchronized void update(Context context,boolean force,Listener listener){
+ public static void check(Context context){
   Context app=context.getApplicationContext();
-  SharedPreferences prefs=app.getSharedPreferences("mh",0);
-  long now=System.currentTimeMillis();
-  if(running){if(listener!=null)listener.finished("An update check is already running.");return;}
-  if(!force&&now-prefs.getLong("mediaEngineLastCheck",0)<CHECK_INTERVAL)return;
-  running=true;
-  // Record attempt before starting to prevent a failed connection from causing an update storm.
-  prefs.edit().putLong("mediaEngineLastCheck",now).apply();
+  if(System.currentTimeMillis()<nextAttempt)return;
+  new Thread(()->checkBlocking(app,false),"mh-extractor-auto-update").start();
+ }
+ /** Called only from media worker threads; acquires a read lock until releaseUse(). */
+ public static void acquireUse(Context context)throws Exception{
+  Context app=context.getApplicationContext();
+  if(System.currentTimeMillis()>=nextAttempt)checkBlocking(app,false);
+  GATE.readLock().lock();
+  try{YoutubeDL.getInstance().init(app);}
+  catch(Exception e){GATE.readLock().unlock();throw e;}
+ }
+ public static void releaseUse(){GATE.readLock().unlock();}
+ public static void update(Context context,boolean force,Listener listener){
+  Context app=context.getApplicationContext();
   new Thread(()->{
+   String result=checkBlocking(app,force);
+   if(listener!=null)listener.finished(result);
+  },"mh-extractor-update").start();
+ }
+ private static String checkBlocking(Context context,boolean force){
+  GATE.writeLock().lock();
+  try{
+   long now=System.currentTimeMillis();
+   SharedPreferences prefs=context.getSharedPreferences("mh",0);
+   if(!force&&now<nextAttempt)return prefs.getString("mediaEngineLastResult","Update check already completed");
+   long last=prefs.getLong("mediaEngineLastSuccess",0);
+   if(!force&&now-last<DAY&&last>0){
+    nextAttempt=last+DAY;
+    return prefs.getString("mediaEngineLastResult","Extractor up to date");
+   }
+   // Set retry backoff before network activity, even when GitHub is unavailable.
+   nextAttempt=now+RETRY;
    String message;
    try{
     YoutubeDL engine=YoutubeDL.getInstance();
-    engine.init(app);
-    Object result=engine.updateYoutubeDL(app,
-     new YoutubeDL.UpdateChannel("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"));
-    message="Media engine update check: "+String.valueOf(result);
-    prefs.edit().putString("mediaEngineLastResult",message).apply();
+    engine.init(context);
+    YoutubeDL.UpdateStatus status=engine.updateYoutubeDL(context,
+      new YoutubeDL.UpdateChannel("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"));
+    String version=engine.version(context);
+    message="Extractor "+String.valueOf(status)+" • version "+(version==null?"bundled":version);
+    prefs.edit().putLong("mediaEngineLastSuccess",System.currentTimeMillis())
+      .putString("mediaEngineLastResult",message).apply();
+    nextAttempt=System.currentTimeMillis()+DAY;
    }catch(Exception e){
-    message="Media engine update unavailable: "+String.valueOf(e.getMessage());
+    String detail=e.getMessage();
+    message="Automatic extractor update failed: "+(detail==null?e.getClass().getSimpleName():detail);
     prefs.edit().putString("mediaEngineLastResult",message).apply();
-   }finally{running=false;}
-   if(listener!=null)listener.finished(message);
-  },"mh-extractor-auto-update").start();
+   }
+   return message;
+  }finally{GATE.writeLock().unlock();}
  }
 }
