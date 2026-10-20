@@ -19,7 +19,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
- LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;
+ LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs;
  static class Tab {WebView web; boolean incognito; Tab(WebView w,boolean p){web=w;incognito=p;}}
@@ -29,7 +29,7 @@ public class BrowserActivity extends Activity {
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
- createTab(false);String saved=prefs.getBoolean("restore",true)?prefs.getString("lastUrl",""):"";if(!saved.isEmpty())navigate(saved);showSplash();}
+ restoreTabs();showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -93,7 +93,7 @@ public class BrowserActivity extends Activity {
  });
  w.setWebViewClient(new WebViewClient(){@Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&address!=null)address.setText(u.equals("about:blank")?"":u);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u);break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc));index=tabs.size()-1;display();}
- void display(){showingSettings=false;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
+ void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
  void tabStrip(){
   HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
   sc.setFillViewport(false);sc.setBackgroundColor(0xff0a1b31);head.addView(sc,new LinearLayout.LayoutParams(-1,dp(51)));
@@ -273,6 +273,21 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }catch(Exception e){link.setError("Could not save shortcut");}
   });});d.show();
  }
+ void saveTabs(){
+  JSONArray a=new JSONArray();int selectedNormal=0;
+  for(int i=0;i<tabs.size();i++){
+   Tab t=tabs.get(i);if(t.incognito)continue;
+   if(i==index)selectedNormal=a.length();
+   String u=t.web.getUrl();a.put(u==null?"about:blank":u);
+  }
+  prefs.edit().putString("tabs",a.toString()).putInt("selectedTab",selectedNormal).apply();
+ }
+ void restoreTabs(){
+  JSONArray a=prefs.getBoolean("restore",true)?readArray("tabs"):new JSONArray();
+  if(a.length()==0){createTab(false);return;}
+  for(int i=0;i<a.length()&&i<12;i++){createTab(false);String u=a.optString(i,"about:blank");if(u.startsWith("http"))navigate(u);}
+  index=Math.max(0,Math.min(tabs.size()-1,prefs.getInt("selectedTab",0)));display();
+ }
  void addHistory(String u){
   if(u==null||!u.startsWith("http"))return;JSONArray old=readArray("history"),a=new JSONArray();a.put(u);
   for(int i=0;i<old.length()&&a.length()<100;i++){String v=old.optString(i);if(!u.equals(v))a.put(v);}storeArray("history",a);
@@ -312,7 +327,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }catch(Exception e){dialog("Download failed","The file could not be queued.");}
  }
  void general(){
-  head.removeAllViews();body.removeAllViews();sectionHeader("General",this::settings);
+  showingSettings=true;screen=2;head.removeAllViews();body.removeAllViews();sectionHeader("General",this::settings);
   LinearLayout l=settingContent();
   settingRow(l,"Search engine","Google Search",()->dialog("Search engine","Google Search is selected for V1.0."));
   switchRow(l,"Restore last page","Reopen the last normal URL on launch","restore",true);
@@ -322,7 +337,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(l,"Home page","MH Browser start page",()->dialog("Home page","MH Browser start page is the default home page."));
  }
  void siteSettings(){
-  head.removeAllViews();body.removeAllViews();sectionHeader("Site settings",this::settings);
+  showingSettings=true;screen=4;head.removeAllViews();body.removeAllViews();sectionHeader("Site settings",this::settings);
   LinearLayout l=settingContent();
   switchRow(l,"Allow website location","Requires Android location permission; websites must ask","location",false);
   switchRow(l,"Allow JavaScript popups","Blocked by default","popups",false);
@@ -335,7 +350,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }).show();
  }
  void advanced(){
-  head.removeAllViews();body.removeAllViews();sectionHeader("Advanced",this::settings);
+  showingSettings=true;screen=5;head.removeAllViews();body.removeAllViews();sectionHeader("Advanced",this::settings);
   LinearLayout l=settingContent();
   switchRow(l,"Enable zoom","Pinch to zoom on websites","zoom",true);
 
@@ -347,7 +362,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  LinearLayout settingContent(){ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout l=column();l.setPadding(dp(15),dp(10),dp(15),dp(20));sc.addView(l);return l;}
 
  void settings(){
-  head.removeAllViews();body.removeAllViews();
+  showingSettings=true;screen=1;head.removeAllViews();body.removeAllViews();
   LinearLayout h=row();h.setPadding(dp(12),dp(8),dp(16),dp(8));head.addView(h);
   h.addView(action("‹",28,this::display),new LinearLayout.LayoutParams(dp(45),dp(48)));
   TextView title=text("Settings",23,WHITE);title.setTypeface(null,Typeface.BOLD);h.addView(title);
@@ -367,7 +382,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(list,"ⓘ  About MH Browser","Version 1.0 • Android",()->dialog("MH Browser","V1.0 test build. Advanced privacy, proxy routing, and background media need further work."));
  }
  void privacy(){
-  head.removeAllViews();body.removeAllViews();
+  showingSettings=true;screen=3;head.removeAllViews();body.removeAllViews();
   LinearLayout h=row();h.setPadding(dp(12),dp(8),dp(12),dp(8));head.addView(h);
   h.addView(action("‹",28,this::settings),new LinearLayout.LayoutParams(dp(45),dp(48)));
   TextView title=text("Privacy & Security",22,WHITE);title.setTypeface(null,Typeface.BOLD);h.addView(title);
@@ -381,8 +396,14 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
 
  void proxy(){LinearLayout list=column();list.setPadding(24,8,24,4);Spinner scheme=new Spinner(this);scheme.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"HTTP","HTTPS","SOCKS5"}));list.addView(scheme);EditText h=new EditText(this),p=new EditText(this),u=new EditText(this),pw=new EditText(this);h.setHint("Host / IP");p.setHint("Port");p.setInputType(2);u.setHint("Username (optional)");pw.setHint("Password (optional)");pw.setInputType(129);list.addView(h);list.addView(p);list.addView(u);list.addView(pw);themed().setTitle("Proxy settings (not active)").setMessage("WebView cannot reliably apply authenticated HTTP/SOCKS proxies via its public API. Saved values are not used for network traffic.").setView(list).setPositiveButton("Save inactive settings",(d,i)->{prefs.edit().putString("proxyHost",h.getText().toString()).putString("proxyPort",p.getText().toString()).putString("proxyType",scheme.getSelectedItem().toString()).apply();Toast.makeText(this,"Saved, proxy is NOT active",Toast.LENGTH_LONG).show();}).setNegativeButton("Cancel",null).show();}
- @Override public void onBackPressed(){if(active().canGoBack())active().goBack();else if(!"about:blank".equals(active().getUrl()))navigate("about:blank");else themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?").setNegativeButton("Cancel",null).setPositiveButton("Exit",(d,i)->finish()).show();}
- @Override protected void onPause(){super.onPause();if(!prefs.getBoolean("audio",false))for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
+ @Override public void onBackPressed(){
+  if(screen>=2){settings();return;}if(screen==1){display();return;}
+  if(active().canGoBack()){active().goBack();return;}
+  if(!"about:blank".equals(active().getUrl())){navigate("about:blank");return;}
+  themed().setTitle("Exit MH Browser?").setMessage("Are you sure you want to exit?")
+   .setNegativeButton("Stay",null).setPositiveButton("Exit",(d,i)->finish()).show();
+ }
+ @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",false))for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
  @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
  @Override protected void onDestroy(){for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}super.onDestroy();}
 }
