@@ -82,7 +82,9 @@ public class BrowserActivity extends Activity {
   address.setImeOptions(2);
   address.setOnEditorActionListener((v,a,e)->{navigate(address.getText().toString());address.clearFocus();
     ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(address.getWindowToken(),0);return true;});
-  TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(46),dp(48)));
+  TextView media=action("↓",24,this::mediaDownloads);media.setContentDescription("Download available media");
+  r.addView(media,new LinearLayout.LayoutParams(dp(38),dp(48)));
+  TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
  void createTab(boolean inc){if(inc&&!privateOnly){startActivity(new Intent(this,PrivateBrowserActivity.class));return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(!inc);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
@@ -591,15 +593,89 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }catch(Exception ignored){}
   dialog("Network information","Connection: "+type+"\nPublic IP and IP-based city cannot be reliably determined offline. Device GPS location and network IP location are different.");
  }
- void downloads(){dialog("Downloads","Direct files are saved with Android Download Manager. Streaming/DRM websites may not provide downloadable media or resolution choices.");}
+
+ void mediaDownloads(){
+  active().evaluateJavascript("(function(){var out=[];var seen={};document.querySelectorAll('video,audio').forEach(function(m){var sources=[m].concat(Array.from(m.querySelectorAll('source')));sources.forEach(function(x){var u=x.currentSrc||x.src;if(!u||!/^https?:/i.test(u)||seen[u])return;seen[u]=1;out.push({url:u,type:(x.type||m.tagName).toLowerCase(),label:x.getAttribute('label')||x.getAttribute('res')||x.getAttribute('size')||''});});});return JSON.stringify(out);})()",raw->{
+   try{
+    String decoded=new JSONArray("["+raw+"]").optString(0,"[]");JSONArray found=new JSONArray(decoded);
+    JSONArray valid=new JSONArray();ArrayList<String> names=new ArrayList<>();
+    for(int i=0;i<found.length();i++){
+     JSONObject o=found.optJSONObject(i);if(o==null)continue;String link=o.optString("url"),type=o.optString("type"),label=o.optString("label");
+     if(link.contains(".m3u8")||link.contains(".mpd"))continue;
+     if(!link.startsWith("http"))continue;
+     boolean audio=type.contains("audio")||link.matches("(?i).*\\.(mp3|m4a|aac|wav|ogg)(\\?.*)?$");
+     names.add((audio?"Audio":"Video")+" • "+(label.isEmpty()?"Original source":label));valid.put(o);
+    }
+    if(names.isEmpty()){dialog("Media downloads","No directly downloadable audio or video file was exposed by this page.");return;}
+    themed().setTitle("Available media").setItems(names.toArray(new String[0]),(d,n)->{
+     JSONObject o=valid.optJSONObject(n);String link=o.optString("url");String mime=o.optString("type");
+     String filename=URLUtil.guessFileName(link,null,mime);
+     themed().setTitle("Download media?").setMessage(names.get(n)+"\n"+filename)
+      .setNegativeButton("Cancel",null).setPositiveButton("Download",(x,y)->startDownload(link,filename,mime)).show();
+    }).setNegativeButton("Cancel",null).show();
+   }catch(Exception e){dialog("Media downloads","This page did not expose a supported direct media file.");}
+  });
+ }
+ void downloads(){
+  showingSettings=true;screen=8;head.removeAllViews();body.removeAllViews();sectionHeader("Downloads",this::display);
+  ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(12),dp(15),dp(22));sc.addView(list);
+  String[] labels={"Today","Previous Day","Week","Monthly","Yearly","All","Choose date"};
+  HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(false);list.addView(horizontal);
+  LinearLayout filters=row();horizontal.addView(filters);
+  for(int i=0;i<labels.length;i++){final int n=i;TextView chip=action(labels[i],12,()->{
+    if(n==6){Calendar now=Calendar.getInstance();new DatePickerDialog(this,(picker,y,m,d)->{
+     Calendar chosen=Calendar.getInstance();chosen.set(y,m,d,0,0,0);chosen.set(Calendar.MILLISECOND,0);
+     prefs.edit().putLong("downloadDate",chosen.getTimeInMillis()).apply();downloadFilter=6;downloads();
+    },now.get(Calendar.YEAR),now.get(Calendar.MONTH),now.get(Calendar.DAY_OF_MONTH)).show();}
+    else{downloadFilter=n;downloads();}
+   });chip.setPadding(dp(13),0,dp(13),0);chip.setBackground(grad(downloadFilter==i?0xff2373a8:PANEL,downloadFilter==i?0xff1a4f7a:PANEL,14));
+   LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(39));lp.rightMargin=dp(7);filters.addView(chip,lp);
+  }
+  JSONArray a=readArray("downloads");int shown=0;
+  DownloadManager dm=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
+  for(int i=a.length()-1;i>=0;i--){
+   JSONObject item=a.optJSONObject(i);if(item==null)continue;long t=item.optLong("time"),id=item.optLong("id");
+   if(!downloadMatches(t))continue;shown++;
+   String name=item.optString("name","Downloaded file");
+   LinearLayout card=row();card.setPadding(dp(14),dp(12),dp(10),dp(12));card.setBackground(grad(0xff193753,0xff10253e,13));
+   LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(9);list.addView(card,lp);
+   LinearLayout info=column();card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
+   TextView title=text("↓  "+name,15,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(title);
+   String date=new java.text.SimpleDateFormat("MMM d, yyyy • h:mm a",Locale.getDefault()).format(new Date(t));
+   int status=0;try( android.database.Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
+    if(cursor!=null&&cursor.moveToFirst())status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+   }catch(Exception ignored){}
+   String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":status==DownloadManager.STATUS_FAILED?"Failed":status==DownloadManager.STATUS_RUNNING?"Downloading":"Pending";
+   info.addView(text(date+" • "+state,12,GRAY));
+   if(status==DownloadManager.STATUS_SUCCESSFUL)card.setOnClickListener(v->{
+    try{Uri uri=dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
+    catch(Exception e){dialog("Open download","No compatible app is available to open this file.");}
+   });
+  }
+  if(shown==0){TextView empty=text("No downloads for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(8),dp(55),dp(8),dp(40));list.addView(empty);}
+ }
+ boolean downloadMatches(long t){
+  Calendar start=Calendar.getInstance();start.set(Calendar.HOUR_OF_DAY,0);start.set(Calendar.MINUTE,0);start.set(Calendar.SECOND,0);start.set(Calendar.MILLISECOND,0);
+  long today=start.getTimeInMillis();
+  if(downloadFilter==0)return t>=today;
+  if(downloadFilter==1)return t>=today-86400000L&&t<today;
+  if(downloadFilter==2)return t>=today-7*86400000L;
+  if(downloadFilter==3){start.set(Calendar.DAY_OF_MONTH,1);return t>=start.getTimeInMillis();}
+  if(downloadFilter==4){start.set(Calendar.DAY_OF_YEAR,1);return t>=start.getTimeInMillis();}
+  if(downloadFilter==6){long d=prefs.getLong("downloadDate",today);return t>=d&&t<d+86400000L;}
+  return true;
+ }
  void startDownload(String link,String filename,String mime){
   try{
    Uri u=Uri.parse(link);if(!"https".equals(u.getScheme())&&!"http".equals(u.getScheme())){dialog("Download unavailable","Only HTTP/HTTPS files are supported.");return;}
    DownloadManager.Request req=new DownloadManager.Request(u);
    req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-   req.setTitle(filename);if(mime!=null)req.setMimeType(mime);
+   req.setTitle(filename);if(mime!=null&&!mime.isEmpty())req.setMimeType(mime);
+   String cookie=CookieManager.getInstance().getCookie(link);if(cookie!=null&&!cookie.isEmpty()&&!tabs.get(index).incognito)req.addRequestHeader("Cookie",cookie);
+   req.addRequestHeader("User-Agent",active().getSettings().getUserAgentString());
    req.setDestinationInExternalFilesDir(this,Environment.DIRECTORY_DOWNLOADS,filename);
-   ((DownloadManager)getSystemService(DOWNLOAD_SERVICE)).enqueue(req);
+   long id=((DownloadManager)getSystemService(DOWNLOAD_SERVICE)).enqueue(req);
+   JSONArray a=readArray("downloads");JSONObject entry=new JSONObject();entry.put("id",id);entry.put("name",filename);entry.put("mime",mime==null?"*/*":mime);entry.put("time",System.currentTimeMillis());a.put(entry);storeArray("downloads",a);
    Toast.makeText(this,"Download started",Toast.LENGTH_SHORT).show();
   }catch(Exception e){dialog("Download failed","The file could not be queued.");}
  }
