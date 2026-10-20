@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: mh-browser-main-release-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -30,9 +33,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-direct"
+          TAG="v1.0-media-20261020-background"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Media Downloader" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Includes yt-dlp and FFmpeg. Device-level media download testing is still required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Background Downloads" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Includes yt-dlp and FFmpeg. Device-level media download testing is still required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
@@ -42,5 +45,9 @@ jobs:
               *) continue ;;
             esac
             cp "$apk" "$dest"
-            gh release upload "$TAG" "$dest" --clobber
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$dest" --clobber; then break; fi
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+              sleep 8
+            done
           done
