@@ -80,6 +80,11 @@ public final class MediaDownloadEngine {
     YoutubeDLRequest req=new YoutubeDLRequest(url);
     req.addOption("--no-playlist");
     req.addOption("--no-mtime");
+    // Fragmented streams can be fetched in parallel where supported by the provider.
+    req.addOption("--concurrent-fragments","4");
+    req.addOption("--retries","5");
+    req.addOption("--fragment-retries","5");
+    req.addOption("--socket-timeout","25");
     req.addOption("--restrict-filenames");
     req.addOption("-o",new File(staging,"%(title).90B-%(id)s.%(ext)s").getAbsolutePath());
     if(choice.audioFormat!=null){
