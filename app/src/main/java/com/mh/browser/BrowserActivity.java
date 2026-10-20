@@ -25,6 +25,7 @@ import android.graphics.drawable.Drawable;
 import androidx.webkit.ProxyConfig;
 import androidx.webkit.ProxyController;
 import androidx.webkit.WebViewFeature;
+import androidx.webkit.WebViewCompat;
 public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
@@ -38,6 +39,7 @@ public class BrowserActivity extends Activity {
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
  final Map<WebView,Integer> mediaInjectionStages=new java.util.WeakHashMap<>();
  final Map<WebView,String> pageForFiltering=java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+ final Map<WebView,Long> recentPlayerTap=new java.util.WeakHashMap<>();
  AlertDialog activeMediaDialog;
  LinearLayout activeDirectMediaOptions;
  String activeMediaPage;
@@ -280,7 +282,12 @@ public class BrowserActivity extends Activity {
  }
  void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));
  // Keep the normal browser visible underneath the isolated private activity.
- overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(!prefs.getBoolean("popups",false));if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(true);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+ // Inject before page scripts, including cross-origin video-player frames.
+ if(WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)){
+  try{WebViewCompat.addDocumentStartJavaScript(w,earlyPageGuardScript(),java.util.Collections.singleton("*"));}
+  catch(Exception ignored){}
+ }
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
   String filename=URLUtil.guessFileName(link,disposition,mime);
@@ -292,6 +299,14 @@ public class BrowserActivity extends Activity {
   @JavascriptInterface public void found(){runOnUiThread(()->signalMediaFound(w));}
   @JavascriptInterface public void pageChanged(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;mediaAvailable=isMediaPage(w.getUrl());updateMediaOverlay();if(mediaAvailable)prefetchMediaFormats(w.getUrl());}});}
   @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
+  @JavascriptInterface public void playerTap(){runOnUiThread(()->recentPlayerTap.put(w,SystemClock.elapsedRealtime()));}
+  @JavascriptInterface public void candidateWithRef(String link,String referer){
+   if(link==null||link.length()>4096||referer==null||referer.length()>4096)return;
+   runOnUiThread(()->{
+    try{Uri u=Uri.parse(link);if(isNetworkMediaUrl(u))noteNetworkMedia(w,u,referer);}
+    catch(Exception ignored){}
+   });
+  }
   @JavascriptInterface public void candidate(String link){
    if(link==null||link.length()>4096)return;
    runOnUiThread(()->{
@@ -304,7 +319,12 @@ public class BrowserActivity extends Activity {
   // Do not let click-to-play advertising scripts open pop-under tabs or
   // replace the video page. Normal same-tab navigation is handled separately.
   @Override public boolean onCreateWindow(WebView view,boolean isDialog,boolean isUserGesture,android.os.Message resultMsg){
-   return false;
+   // Reject popunders completely unless the user explicitly enabled popups.
+   if(!prefs.getBoolean("popups",false)||!isUserGesture||resultMsg==null)return false;
+   createTab(privateOnly);
+   android.webkit.WebView.WebViewTransport transport=(android.webkit.WebView.WebViewTransport)resultMsg.obj;
+   transport.setWebView(active());resultMsg.sendToTarget();
+   return true;
   }
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
   @Override public void onProgressChanged(WebView view,int progress){
@@ -342,7 +362,12 @@ public class BrowserActivity extends Activity {
    Uri target=request.getUrl();String scheme=target.getScheme();
    if(scheme==null)return false;
    if(scheme.equalsIgnoreCase("http")||scheme.equalsIgnoreCase("https")){
-    if(AdBlockRules.shouldBlockNavigation(target,prefs.getBoolean("adBlocker",true)))return true;
+    if(prefs.getBoolean("adBlocker",true)){
+     if(AdBlockRules.shouldBlockNavigation(target,true))return true;
+     Long tapped=recentPlayerTap.get(view);
+     if(tapped!=null&&SystemClock.elapsedRealtime()-tapped<3000&&
+        AdBlockRules.isCrossSiteAdRedirect(target,pageForFiltering.get(view)))return true;
+    }
     return false;
    }
    if(scheme.equalsIgnoreCase("about"))return false;
@@ -410,7 +435,11 @@ public class BrowserActivity extends Activity {
     recoverFailedVideoHost(v,request.getUrl().toString(),detail);
   }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
-   if(AdBlockRules.shouldBlockNavigation(Uri.parse(u==null?"":u),prefs.getBoolean("adBlocker",true))){
+   Long tapped=recentPlayerTap.get(v);
+   if(AdBlockRules.shouldBlockNavigation(Uri.parse(u==null?"":u),prefs.getBoolean("adBlocker",true))||
+      (prefs.getBoolean("adBlocker",true)&&tapped!=null&&
+       SystemClock.elapsedRealtime()-tapped<3000&&
+       AdBlockRules.isCrossSiteAdRedirect(Uri.parse(u==null?"":u),pageForFiltering.get(v)))){
     v.stopLoading();
     if(v.canGoBack())v.goBack();
     return;
@@ -828,9 +857,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if("javascript".equals(pref))ws.setJavaScriptEnabled(v);
    if("images".equals(pref))ws.setLoadsImagesAutomatically(v);
    if("zoom".equals(pref)){ws.setSupportZoom(v);ws.setBuiltInZoomControls(v);}
-   if("popups".equals(pref)){ws.setJavaScriptCanOpenWindowsAutomatically(v);ws.setSupportMultipleWindows(!v);}
+   if("popups".equals(pref)){ws.setJavaScriptCanOpenWindowsAutomatically(v);ws.setSupportMultipleWindows(true);}
    if("blockCookies".equals(pref))CookieManager.getInstance().setAcceptThirdPartyCookies(t.web,!v&&!t.incognito);
-   if("adBlocker".equals(pref))applyAdCosmetics(t.web);
+   if("adBlocker".equals(pref)){
+    applyAdCosmetics(t.web);
+    // A reload re-evaluates blocked network requests and document-start guards.
+    if(t.web==active()&&t.web.getUrl()!=null&&t.web.getUrl().startsWith("http"))t.web.reload();
+   }
   }
   if("location".equals(pref)&&v&&checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
    requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,android.Manifest.permission.ACCESS_COARSE_LOCATION},201);
@@ -1071,6 +1104,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  // Detect media on dynamically rendered pages, SPA routes and supported embeds.
  // A media element's presence triggers the button; the download engine separately
  // determines whether the site provides an accessible, non-DRM source.
+ String earlyPageGuardScript(){
+  return "(function(){\n if(window.__mhEarlyGuard)return;\n window.__mhEarlyGuard=true;\n window.MHAdBlockEnabled="+(prefs.getBoolean("adBlocker",true)?"true":"false")+";\n var realOpen=window.open;\n window.open=function(){\n   if(window.MHAdBlockEnabled)return null;\n   return realOpen.apply(window,arguments);\n };\n function send(u){\n   try{\n     if(!u||typeof u!=='string'||u.length>4096||!/^https?:\\/\\//i.test(u))return;\n     var x=new URL(u,location.href),p=x.pathname.toLowerCase();\n     if(!/\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8)$/.test(p)&&\n        !(/(\\/master|\\/playlist|\\/index|\\/hls|\\/manifest)$/.test(p)&&/m3u8|hls|format=mp4/i.test(x.search)))return;\n     if(window.MHMedia&&window.MHMedia.candidateWithRef)\n       window.MHMedia.candidateWithRef(x.href,location.href);\n   }catch(e){}\n }\n function scan(){\n   try{\n     document.querySelectorAll('video,audio,video source,audio source').forEach(function(m){send(m.currentSrc||m.src);});\n   }catch(e){}\n }\n try{\n   new PerformanceObserver(function(items){\n     items.getEntries().forEach(function(item){send(item.name);});\n   }).observe({entryTypes:['resource']});\n }catch(e){}\n document.addEventListener('pointerdown',function(e){\n   try{\n     var el=e.target;\n     if(el&&el.closest&&el.closest('video,audio,.jwplayer,.plyr,.video-js,.vjs-control-bar,.jw-video,.jw-display,.dplayer,.art-video-player,[class*=\"video-player\"],[id*=\"video-player\"]'))\n       if(window.MHMedia&&window.MHMedia.playerTap)window.MHMedia.playerTap();\n   }catch(e){}\n },true);\n document.addEventListener('play',function(e){\n   if(e.target&&/^(VIDEO|AUDIO)$/.test(e.target.tagName)){\n     scan();\n     if(window.MHMedia&&window.MHMedia.playing)window.MHMedia.playing();\n   }\n },true);\n document.addEventListener('DOMContentLoaded',scan);\n setInterval(scan,1800);\n})();";
+ }
  void applyAdCosmetics(WebView w){
   if(w==null||w.getUrl()==null||!w.getUrl().startsWith("http"))return;
   w.evaluateJavascript("window.MHAdBlockEnabled="+(prefs.getBoolean("adBlocker",true)?"true":"false")+";",null);
