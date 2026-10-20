@@ -83,6 +83,12 @@ public class BrowserActivity extends Activity {
    if(h.equals("youtu.be"))return path.length()>1;
    if(h.equals("youtube.com")||h.endsWith(".youtube.com"))
     return (path.equals("/watch")&&p.getQueryParameter("v")!=null)||path.startsWith("/shorts/")||path.startsWith("/live/");
+   if(h.equals("facebook.com")||h.endsWith(".facebook.com"))
+    return path.startsWith("/watch")||path.startsWith("/reel/")||path.contains("/videos/")||path.startsWith("/share/v/");
+   if(h.equals("instagram.com")||h.endsWith(".instagram.com"))
+    return path.startsWith("/reel/")||path.startsWith("/tv/");
+   if(h.equals("tiktok.com")||h.endsWith(".tiktok.com"))
+    return path.contains("/video/")||path.startsWith("/v/");
    if(h.equals("soundcloud.com")||h.endsWith(".soundcloud.com"))return path.split("/").length>=3;
    if(h.equals("vimeo.com")||h.endsWith(".vimeo.com"))return path.matches("/[0-9]+.*");
    if(h.equals("dailymotion.com")||h.endsWith(".dailymotion.com"))return path.startsWith("/video/");
@@ -97,7 +103,7 @@ public class BrowserActivity extends Activity {
   if(u!=null&&u.startsWith("http"))w.evaluateJavascript(mediaSourceScript(),raw->{
    if(!u.equals(w.getUrl()))return;
    JSONArray direct=parseMediaSources(raw);
-   if(direct.length()>0)directMediaCache.put(u,direct);
+   if(direct.length()>0)mergeDirectMedia(u,direct);
   });
  }
  void prefetchMediaFormats(String u){inspectFormatsCached(u,null);}
@@ -1045,7 +1051,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    "var hasEmbed=false;embeds.forEach(function(el){var u=el.getAttribute('src')||el.getAttribute('data')||'';"+
    "if(/(youtube\\.com\\/embed|youtu\\.be\\/|player\\.vimeo\\.com|dailymotion\\.com\\/embed|facebook\\.com\\/plugins\\/video|instagram\\.com\\/reel|tiktok\\.com\\/embed|soundcloud\\.com\\/player|streamable\\.com\\/e\\/|\\/embed\\/|\\/player\\/)/i.test(u))hasEmbed=true;});"+
    "var meta=Array.from(document.querySelectorAll('meta[property],meta[name]')).some(function(m){return /^(og:video|og:audio|twitter:player)(:|$)/.test(m.getAttribute('property')||m.getAttribute('name')||'');});"+
-   "if((els.length||hasEmbed||meta)&&!found){found=true;MHMedia.found();}"+
+   "var linked=!!document.querySelector('a[href$=\\\".mp4\\\"],a[href$=\\\".mp3\\\"],a[href$=\\\".webm\\\"],a[href$=\\\".m4a\\\"]');"+
+   "if((els.length||hasEmbed||meta||linked)&&!found){found=true;MHMedia.found();}"+
    "els.forEach(function(el){if(el.dataset.mhTracked)return;el.dataset.mhTracked='1';"+
    "el.addEventListener('play',function(){MHMedia.playing();});"+
    "el.addEventListener('playing',function(){MHMedia.playing();});"+
@@ -1063,6 +1070,21 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(u==null)return false;
   String path=u.getPath();if(path==null)return false;
   return path.toLowerCase(Locale.ROOT).matches(".*\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd)$");
+ }
+ void mergeDirectMedia(String page,JSONArray discovered){
+  if(page==null||discovered==null)return;
+  JSONArray merged=directMediaCache.get(page);
+  if(merged==null){merged=new JSONArray();directMediaCache.put(page,merged);}
+  Set<String> seen=new HashSet<>();
+  for(int i=0;i<merged.length();i++){
+   JSONObject obj=merged.optJSONObject(i);if(obj!=null)seen.add(obj.optString("url"));
+  }
+  for(int i=0;i<discovered.length()&&merged.length()<16;i++){
+   JSONObject obj=discovered.optJSONObject(i);
+   if(obj!=null&&!seen.contains(obj.optString("url"))){
+    merged.put(obj);seen.add(obj.optString("url"));
+   }
+  }
  }
  void noteNetworkMedia(WebView v,Uri media){
   if(tabs.isEmpty()||v!=active()||media==null)return;
@@ -1187,8 +1209,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    if(!dialog.isShowing())return;
    JSONArray direct=parseMediaSources(sourceRaw);
    if(direct.length()>0){
-    directMediaCache.put(initialUrl,direct);
-    showDirectChoices(directOptions,direct,dialog);
+    mergeDirectMedia(initialUrl,direct);
+    showDirectChoices(directOptions,directMediaCache.get(initialUrl),dialog);
    }
   });
  }
