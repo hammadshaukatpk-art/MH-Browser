@@ -1,3 +1,10 @@
+## Background media downloads and extractor maintenance — October 20, 2026
+- Video/audio downloads now start in an Android foreground data-sync service. Hiding the media panel or leaving the browser does not immediately cancel the transfer; Android may still terminate long-running transfers under system constraints.
+- Progress and reported transfer speed are written to the existing Downloads section, refreshed while it is open, and displayed in Android download notifications (notification permission required on Android 13+). Completion and failure are recorded persistently, and the notification opens the Downloads section.
+- yt-dlp checks for a newer extractor asynchronously at most once every 24 hours when MH Browser opens, with a manual **Check now** option under Advanced settings. Updates require internet and a compatible upstream release; website changes, login requirements, restrictions and DRM can still break downloads.
+- Added concurrent fragment fetching (4) and retry settings (5) where supported. Throughput remains dependent on the source site and network; speed is shown only when reported by the extractor.
+- Format selection still opens immediately while supported resolutions/audio choices load asynchronously. Video playback cache is not equivalent to a fully downloaded file.
+
 ## Faster media download controls — October 20, 2026
 - On recognized YouTube watch/short/live URLs, the floating media download button appears without waiting for the media play event. On other websites, the button appears as soon as the page exposes an HTML5 audio/video element. YouTube SPA URL transitions are detected.
 - Tapping the button opens a structured MH Browser themed media download panel immediately. Format inspection continues asynchronously; video resolutions and audio conversion choices appear in the same panel when yt-dlp returns genuine available formats. A slow network or provider restriction can delay the options even though the panel opens instantly.
