@@ -36,6 +36,8 @@ public class BrowserActivity extends Activity {
  final Map<String,String> mediaTitleCache=new HashMap<>();
  final Map<String,JSONArray> directMediaCache=new HashMap<>();
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
+ final Map<WebView,String> lastWorkingPage=new java.util.WeakHashMap<>();
+ final Map<WebView,Long> videoConnectionRecovery=new java.util.WeakHashMap<>();
  final Set<String> mediaInspecting=new HashSet<>();
  final Handler downloadUiHandler=new Handler(Looper.getMainLooper());
  final Map<String,TextView> downloadStatusViews=new HashMap<>();
@@ -232,6 +234,38 @@ public class BrowserActivity extends Activity {
    return host!=null&&(host.equalsIgnoreCase("facebook.com")||host.toLowerCase(java.util.Locale.ROOT).endsWith(".facebook.com"));
   }catch(Exception ignored){return false;}
  }
+ // Broken HTTPS video hosts cannot be fixed by bypassing certificate checks.
+ // Return to the prior player when possible, without hiding unrelated errors.
+ void recoverFailedVideoHost(WebView view,String url,String message){
+  if(view!=active())return;
+  long now=SystemClock.elapsedRealtime();
+  Long prior=videoConnectionRecovery.get(view);
+  if(prior!=null&&now-prior<4500)return;
+  videoConnectionRecovery.put(view,now);
+  String previous=lastWorkingPage.get(view);
+  String current=url==null?"":url;
+  boolean hasHistory=view.canGoBack();
+  boolean hasSaved=previous!=null&&!previous.equals(current);
+  if(hasHistory){
+   view.post(()->{
+    if(view.canGoBack())view.goBack();
+    Toast.makeText(this,"Video host connection failed. Try another source on the original page.",Toast.LENGTH_LONG).show();
+   });
+  }else if(hasSaved){
+   view.post(()->{
+    view.loadUrl(previous);
+    Toast.makeText(this,"Video host connection failed. Try another source.",Toast.LENGTH_LONG).show();
+   });
+  }else{
+   themed().setTitle("Video server unavailable")
+    .setMessage("This video host failed its secure connection. MH Browser cannot bypass a broken HTTPS server. Return to the original website and choose another video source.")
+    .setPositiveButton("Back to website",(d,n)->{
+     if(view.canGoBack())view.goBack();
+     else if(tabs.size()>1)closeTab(index);
+    })
+    .setNegativeButton("Close",null).show();
+  }
+ }
  void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));
  // Keep the normal browser visible underneath the isolated private activity.
  overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
@@ -317,6 +351,18 @@ public class BrowserActivity extends Activity {
    Toast.makeText(BrowserActivity.this,"No app available to open this link",Toast.LENGTH_SHORT).show();
    return true;
   }
+  @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler handler,android.net.http.SslError error){
+   handler.cancel(); // Never ignore certificate errors to force a video to play.
+   String failing=error==null?null:error.getUrl();
+   recoverFailedVideoHost(v,failing,"SSL connection failed");
+  }
+  @Override public void onReceivedError(WebView v,WebResourceRequest request,android.webkit.WebResourceError error){
+   if(!request.isForMainFrame())return;
+   String detail=error==null?"":String.valueOf(error.getDescription());
+   int code=error==null?0:error.getErrorCode();
+   if(code==WebViewClient.ERROR_FAILED_SSL_HANDSHAKE||detail.toLowerCase(java.util.Locale.ROOT).contains("ssl_protocol_error")||detail.toLowerCase(java.util.Locale.ROOT).contains("ssl handshake"))
+    recoverFailedVideoHost(v,request.getUrl().toString(),detail);
+  }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
    if(v==active()){
     mediaPlaying=false;mediaAvailable=isMediaPage(u);updateMediaOverlay();
@@ -332,6 +378,11 @@ public class BrowserActivity extends Activity {
     if(screen==0&&webPageLayer==null&&u!=null&&!"about:blank".equals(u))display();
     if(address!=null)address.setText(u.equals("about:blank")?"":u);
     if(isMediaPage(u)){mediaAvailable=true;updateMediaOverlay();prefetchMediaFormats(u);}
+   }
+   // Keep a safe return point when a third-party video host fails.
+   if(u!=null&&(u.startsWith("https://")||u.startsWith("http://"))){
+    Long recovery=videoConnectionRecovery.get(v);
+    if(recovery==null||SystemClock.elapsedRealtime()-recovery>5000)lastWorkingPage.put(v,u);
    }
    refreshTabTitle(v);
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;var found=false,lastHref=location.href;function watch(){if(location.href!==lastHref){lastHref=location.href;found=false;MHMedia.pageChanged()}var media=document.querySelectorAll('video,audio');if(media.length&&!found){found=true;MHMedia.found()}media.forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
@@ -528,12 +579,12 @@ public class BrowserActivity extends Activity {
   card.setBackground(grad(0xff1a405b,0xff123047,14));
   LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
   cp.bottomMargin=dp(11);panel.addView(card,cp);
-  // Official-style WhatsApp mark: white vector glyph on WhatsApp green.
+  // Exact WhatsApp logo from the supplied reference, transparent background.
   ImageView icon=new ImageView(this);
-  icon.setImageResource(R.drawable.ic_whatsapp_brand);
+  icon.setImageResource(R.drawable.whatsapp_contact);
   icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-  icon.setBackground(bg(0xff25d366));
-  icon.setPadding(dp(8),dp(8),dp(8),dp(8));
+  icon.setBackgroundColor(Color.TRANSPARENT);
+  icon.setPadding(0,0,0,0);
   card.addView(icon,new LinearLayout.LayoutParams(dp(43),dp(43)));
   LinearLayout info=column();info.setPadding(dp(13),0,0,0);
   card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
