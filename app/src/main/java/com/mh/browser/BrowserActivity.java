@@ -35,6 +35,28 @@ public class BrowserActivity extends Activity {
  final Map<String,java.util.List<MediaDownloadEngine.Choice>> mediaFormatCache=new HashMap<>();
  final Map<String,String> mediaTitleCache=new HashMap<>();
  final Set<String> mediaInspecting=new HashSet<>();
+ final Handler downloadUiHandler=new Handler(Looper.getMainLooper());
+ final Map<String,TextView> downloadStatusViews=new HashMap<>();
+ final Map<String,ProgressBar> downloadProgressViews=new HashMap<>();
+ final Runnable downloadUiTick=new Runnable(){@Override public void run(){
+  if(screen!=8||isFinishing()||isDestroyed())return;
+  JSONArray entries=readArray("downloads");int count=0;
+  for(int i=0;i<entries.length();i++){
+   JSONObject item=entries.optJSONObject(i);if(item==null||item.optLong("id")!=-2||!downloadMatches(item.optLong("time")))continue;
+   count++;
+   String task=item.optString("task");
+   TextView status=downloadStatusViews.get(task);
+   ProgressBar progress=downloadProgressViews.get(task);
+   if(status!=null){
+    String state=item.optString("state","Pending");
+    status.setText(state+" • "+item.optInt("progress",0)+"% • "+item.optString("detail",""));
+   }
+   if(progress!=null){progress.setProgress(item.optInt("progress",0));
+    progress.setVisibility("Downloading".equals(item.optString("state"))?View.VISIBLE:View.GONE);}
+  }
+  if(count!=downloadStatusViews.size()){downloads();return;}
+  downloadUiHandler.postDelayed(this,900);
+ }};
  final Map<String,ArrayList<MediaFormatListener>> mediaListeners=new HashMap<>();
  interface MediaFormatListener {void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices);void failed(String error);}
  boolean isMediaPage(String u){
@@ -86,7 +108,7 @@ public class BrowserActivity extends Activity {
  LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(0);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
  TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
- @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
+ @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);MediaEngineUpdater.check(getApplicationContext());CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
  if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
   String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
@@ -111,7 +133,7 @@ public class BrowserActivity extends Activity {
    TextView version=text("Version 1.0",12,GRAY);version.setGravity(Gravity.CENTER);
    LinearLayout.LayoutParams vp=new LinearLayout.LayoutParams(-1,-2);vp.topMargin=dp(22);splash.addView(version,vp);
    setContentView(splash);
-   new Handler(Looper.getMainLooper()).postDelayed(()->{if(!isFinishing()&&!isDestroyed()){setContentView(root);root.requestApplyInsets();}},1250);
+   new Handler(Looper.getMainLooper()).postDelayed(()->{if(!isFinishing()&&!isDestroyed()){setContentView(root);root.requestApplyInsets();if(getIntent()!=null&&getIntent().getBooleanExtra("openDownloads",false)){getIntent().removeExtra("openDownloads");downloads();}}},1250);
  }
  void nav(String s,Runnable run){TextView t=action(s,25,run);bar.addView(t,new LinearLayout.LayoutParams(0,dp(58),1));}
  void controls(){bar.removeAllViews();bar.setPadding(dp(8),dp(2),dp(8),dp(2));nav("‹",()->{if(active().canGoBack())active().goBack();else navigate("about:blank");});nav("›",()->{if(active().canGoForward())active().goForward();});nav("⌂",()->navigate("about:blank"));nav("▣",this::tabActions);nav("☰",this::menu);}
@@ -900,35 +922,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   });
  }
  void downloadMediaFile(String mediaUrl,MediaDownloadEngine.Choice choice){
-  LinearLayout panel=column();panel.setPadding(dp(22),dp(12),dp(22),dp(12));
-  ProgressBar progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
-  progress.setMax(100);panel.addView(progress,new LinearLayout.LayoutParams(-1,dp(6)));
-  TextView status=text("Preparing download…",13,GRAY);status.setPadding(0,dp(12),0,0);panel.addView(status);
-  AlertDialog window=themed().setTitle("Downloading media").setView(panel)
-   .setPositiveButton("Hide",(d,n)->Toast.makeText(this,"Download continues while MH Browser is running",Toast.LENGTH_LONG).show()).create();
-  window.setCancelable(false);window.show();styleDialog(window);
-  MediaDownloadEngine.download(getApplicationContext(),mediaUrl,choice,new MediaDownloadEngine.Callback(){
-   @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
-   @Override public void progress(int percent,String message){
-    runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){progress.setProgress(percent);status.setText("Downloading • "+percent+"%");}});
+  try{
+   MediaDownloadService.enqueue(getApplicationContext(),mediaUrl,choice);
+   Toast.makeText(this,"Download started. Track progress in Downloads or Android notifications.",Toast.LENGTH_LONG).show();
+   if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+    requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},302);
    }
-   @Override public void completed(String name,String uri,String mime){
-    runOnUiThread(()->{
-     if(isFinishing()||isDestroyed())return;
-     window.dismiss();
-     try{
-      JSONArray records=readArray("downloads");JSONObject record=new JSONObject();
-      record.put("id",-1);record.put("uri",uri);record.put("name",name);record.put("mime",mime);
-      record.put("time",System.currentTimeMillis());records.put(record);storeArray("downloads",records);
-     }catch(Exception ignored){}
-     themed().setTitle("Download complete").setMessage(name+"\nSaved in Downloads / MH Browser")
-      .setNegativeButton("Close",null).setPositiveButton("View downloads",(d,n)->downloads()).show();
-    });
-   }
-   @Override public void failed(String error){
-    runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){window.dismiss();dialog("Download failed",error);}});
-   }
-  });
+  }catch(Exception e){dialog("Download unavailable","Could not start background download: "+e.getMessage());}
  }
  void lookupPublicIp(){
   themed().setTitle("Public IP lookup").setMessage("This sends your public IP to ipwho.is to retrieve approximate IP-based country, region and city. Continue?")
@@ -962,6 +962,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    });chip.setPadding(dp(13),0,dp(13),0);chip.setBackground(grad(downloadFilter==i?0xff2373a8:PANEL,downloadFilter==i?0xff1a4f7a:PANEL,14));
    LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,dp(39));lp.rightMargin=dp(7);filters.addView(chip,lp);
   }
+  downloadUiHandler.removeCallbacks(downloadUiTick);
+  downloadStatusViews.clear();downloadProgressViews.clear();
   JSONArray a=readArray("downloads");int shown=0;String lastDate="";
   DownloadManager dm=(DownloadManager)getSystemService(DOWNLOAD_SERVICE);
   for(int i=a.length()-1;i>=0;i--){
@@ -976,17 +978,32 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    TextView title=text("↓  "+name,15,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(title);
    String date=new java.text.SimpleDateFormat("MMM d, yyyy • h:mm a",Locale.getDefault()).format(new Date(t));
    int status=id==-1?DownloadManager.STATUS_SUCCESSFUL:0;
-   if(id!=-1)try(android.database.Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
+   if(id==-2){
+    String savedState=item.optString("state","Pending");
+    status="Completed".equals(savedState)?DownloadManager.STATUS_SUCCESSFUL:
+      "Failed".equals(savedState)?DownloadManager.STATUS_FAILED:DownloadManager.STATUS_RUNNING;
+   }else if(id!=-1)try(android.database.Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
     if(cursor!=null&&cursor.moveToFirst())status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
    }catch(Exception ignored){}
    String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":status==DownloadManager.STATUS_FAILED?"Failed":status==DownloadManager.STATUS_RUNNING?"Downloading":"Pending";
-   info.addView(text(date+" • "+state,12,GRAY));
+   TextView statusLine=text(date+" • "+state+(id==-2?" • "+item.optInt("progress",0)+"% • "+item.optString("detail",""):""),12,GRAY);
+   info.addView(statusLine);
+   if(id==-2){
+    String task=item.optString("task");downloadStatusViews.put(task,statusLine);
+    ProgressBar p=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);p.setMax(100);
+    p.setProgress(item.optInt("progress",0));
+    LinearLayout.LayoutParams progressLp=new LinearLayout.LayoutParams(-1,dp(5));progressLp.topMargin=dp(7);
+    info.addView(p,progressLp);
+    p.setVisibility(status==DownloadManager.STATUS_RUNNING?View.VISIBLE:View.GONE);
+    downloadProgressViews.put(task,p);
+   }
    if(status==DownloadManager.STATUS_SUCCESSFUL)card.setOnClickListener(v->{
-    try{Uri uri=id==-1?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
+    try{Uri uri=id<0?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
     catch(Exception e){dialog("Open download","No compatible app is available to open this file.");}
    });
   }
   if(shown==0){TextView empty=text("No downloads for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(8),dp(55),dp(8),dp(40));list.addView(empty);}
+  downloadUiHandler.postDelayed(downloadUiTick,900);
  }
  boolean downloadMatches(long t){
   Calendar start=Calendar.getInstance();start.set(Calendar.HOUR_OF_DAY,0);start.set(Calendar.MINUTE,0);start.set(Calendar.SECOND,0);start.set(Calendar.MILLISECOND,0);
@@ -1045,24 +1062,16 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
 
  void updateMediaEngine(){
-  themed().setTitle("Update media engine")
-   .setMessage("Download the latest stable media extractor from the yt-dlp project? This updates only the media download component and requires internet access.")
-   .setNegativeButton("Cancel",null)
-   .setPositiveButton("Update",(d,n)->{
-    AlertDialog wait=themed().setTitle("Updating media engine").setMessage("Checking for a stable update…").create();
+  String last=prefs.getString("mediaEngineLastResult","No previous update check recorded.");
+  themed().setTitle("Media engine updates")
+   .setMessage("MH Browser checks for yt-dlp extractor updates automatically about once per day when opened. Updates require internet access and cannot guarantee every site will work.\n\nLast result: "+last)
+   .setNegativeButton("Close",null)
+   .setPositiveButton("Check now",(d,n)->{
+    AlertDialog wait=themed().setTitle("Checking extractor updates").setMessage("Checking the latest available release…").create();
     wait.show();styleDialog(wait);
-    new Thread(()->{
-     String message;
-     try{
-      com.yausername.youtubedl_android.YoutubeDL engine=com.yausername.youtubedl_android.YoutubeDL.getInstance();
-      engine.init(getApplicationContext());
-      Object result=engine.updateYoutubeDL(getApplicationContext(),
-       new com.yausername.youtubedl_android.YoutubeDL.UpdateChannel("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"));
-      message="Media engine update finished: "+String.valueOf(result);
-     }catch(Exception e){message="Update could not complete: "+String.valueOf(e.getMessage());}
-     final String done=message;
-     runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){wait.dismiss();dialog("Media engine",done);}});
-    },"mh-media-update").start();
+    MediaEngineUpdater.update(getApplicationContext(),true,message->runOnUiThread(()->{
+     if(!isFinishing()&&!isDestroyed()){wait.dismiss();dialog("Media engine",message);}
+    }));
    }).show();
  }
  void sectionHeader(String label,Runnable back){
@@ -1158,5 +1167,6 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  @Override protected void onPause(){saveTabs();super.onPause();if(!prefs.getBoolean("audio",true))for(Tab t:tabs)t.web.onPause();CookieManager.getInstance().flush();}
  @Override protected void onResume(){super.onResume();for(Tab t:tabs)t.web.onResume();}
- @Override protected void onDestroy(){if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();}super.onDestroy();}
+ @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent!=null&&intent.getBooleanExtra("openDownloads",false)){intent.removeExtra("openDownloads");downloads();}}
+ @Override protected void onDestroy(){downloadUiHandler.removeCallbacks(downloadUiTick);if(fullscreenVideo!=null)hideVideo();for(Tab t:tabs)if(t.incognito){t.web.clearHistory();t.web.clearCache(true);}if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();}super.onDestroy();}
 }
