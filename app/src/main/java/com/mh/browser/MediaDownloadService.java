@@ -202,13 +202,13 @@ public class MediaDownloadService extends Service {
     save(task,name,"Completed",100,"Download complete",uri,mime);
     manager.notify(id,completedNotification(task,name,uri,mime));
     control.done=true;control.change(false);controls.remove(task,control);
-    control.done=true;control.change(false);controls.remove(task,control);
     lastWriteByTask.remove(task);
     finish(startId);
    }
    @Override public void failed(String error){
     save(task,choice.label,"Failed",0,error,null,null);
     manager.notify(id,notification("Download failed",shortText(error),0,false,true));
+    control.done=true;control.change(false);controls.remove(task,control);
     lastWriteByTask.remove(task);
     finish(startId);
    }
