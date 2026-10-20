@@ -59,7 +59,7 @@ public class MediaDownloadService extends Service {
    }
    @Override public void completed(String name,String uri,String mime){
     save(task,name,"Completed",100,"Download complete",uri,mime);
-    manager.notify(id,notification("Download complete",name,100,false,false));
+    manager.notify(id,completedNotification(task,name,uri,mime));
     finish(startId);
    }
    @Override public void failed(String error){
@@ -81,6 +81,22 @@ public class MediaDownloadService extends Service {
   if(line==null)return "";
   Matcher m=Pattern.compile("([0-9]+(?:\\.[0-9]+)?\\s*(?:KiB|MiB|GiB|KB|MB|GB)/s)",Pattern.CASE_INSENSITIVE).matcher(line);
   return m.find()?m.group(1):"";
+ }
+ private Notification completedNotification(String task,String name,String uri,String mime){
+  Intent play=new Intent(this,DownloadedMediaActivity.class);
+  play.setAction("com.mh.browser.OPEN_DOWNLOAD."+task);
+  play.setDataAndType(android.net.Uri.parse(uri),mime);
+  play.putExtra("name",name);
+  play.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION);
+  play.setClipData(ClipData.newRawUri("Downloaded media",android.net.Uri.parse(uri)));
+  PendingIntent click=PendingIntent.getActivity(this,notificationId(task),play,
+    PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+  Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
+  return b.setSmallIcon(android.R.drawable.stat_sys_download_done)
+   .setContentTitle("Download complete • Tap to play")
+   .setContentText(shortText(name)).setContentIntent(click)
+   .setAutoCancel(true).setOnlyAlertOnce(true)
+   .setVisibility(Notification.VISIBILITY_PRIVATE).build();
  }
  private static String shortText(String s){return s==null?"Unknown error":s.length()>100?s.substring(0,100):s;}
  private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed){
