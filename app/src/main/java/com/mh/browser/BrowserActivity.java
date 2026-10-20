@@ -30,7 +30,7 @@ public class BrowserActivity extends Activity {
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
  View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer,webPageLayer;
  TextView mediaOverlay,fullscreenMediaOverlay;
- boolean mediaPlaying=false, privateOnly=false; int historyFilter=0,downloadFilter=0;
+ boolean mediaPlaying=false, mediaAvailable=false, privateOnly=false; int historyFilter=0,downloadFilter=0;
  final LruCache<String,Bitmap> shortcutIconCache=new LruCache<>(24);
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
  android.content.SharedPreferences prefs; String proxyUser="",proxyPassword="";
@@ -97,8 +97,8 @@ public class BrowserActivity extends Activity {
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
  w.addJavascriptInterface(new Object(){
-  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;updateMediaOverlay();}});}
-  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
+  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;refreshMediaAvailability();}});}
+  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();}});}
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
@@ -120,7 +120,7 @@ public class BrowserActivity extends Activity {
    if(prefs.getBoolean("proxyActive",false)&&host.equalsIgnoreCase(prefs.getString("proxyHost",""))&&!proxyUser.isEmpty()&&!proxyPassword.isEmpty()){handler.proceed(proxyUser,proxyPassword);}
    else handler.cancel();
   }
-  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;updateMediaOverlay();if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
+  @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()){mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();if(!showingSettings)display();}}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;function watch(){document.querySelectorAll('video,audio').forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
  void display(){
@@ -136,7 +136,7 @@ public class BrowserActivity extends Activity {
    mediaOverlay=makeMediaOverlay();
    FrameLayout.LayoutParams mp=new FrameLayout.LayoutParams(dp(59),dp(59),Gravity.END|Gravity.BOTTOM);
    mp.setMargins(dp(12),dp(12),dp(17),dp(85));layer.addView(mediaOverlay,mp);
-   mediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
+   mediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
    address.setText(w.getUrl());
   }
   controls();
@@ -156,7 +156,7 @@ public class BrowserActivity extends Activity {
   }
   TextView add=action("+",27,()->createTab(false));add.setBackground(bg(PANEL));row.addView(add,new LinearLayout.LayoutParams(dp(39),dp(39)));
  }
- void closeTab(int n){if(n<0||n>=tabs.size())return;mediaPlaying=false;updateMediaOverlay();Tab old=tabs.remove(n);old.web.stopLoading();old.web.destroy();
+ void closeTab(int n){if(n<0||n>=tabs.size())return;mediaPlaying=false;mediaAvailable=false;updateMediaOverlay();Tab old=tabs.remove(n);old.web.stopLoading();old.web.destroy();
   if(tabs.isEmpty()){index=-1;createTab(false);}else{if(n<index)index--;else if(n==index)index=Math.min(n,tabs.size()-1);display();}}
  void tabActions(){String[] options={"New tab","New private tab","Close current tab","Switch tab"};themed().setTitle("Tabs").setItems(options,(d,n)->{if(n==0)createTab(false);else if(n==1)createTab(true);else if(n==2)closeTab(index);else tabPicker();}).show();}
  void tabPicker(){String[] names=new String[tabs.size()];for(int i=0;i<tabs.size();i++){String t=tabs.get(i).web.getTitle();names[i]=(tabs.get(i).incognito?"◉ ":"")+(t==null?"New tab":t);}themed().setTitle("Switch tab").setSingleChoiceItems(names,index,(d,n)->{index=n;d.dismiss();display();}).setNegativeButton("Close",null).show();}
@@ -370,8 +370,8 @@ public class BrowserActivity extends Activity {
   return button;
  }
  void updateMediaOverlay(){
-  if(mediaOverlay!=null)mediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
-  if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
+  if(mediaOverlay!=null)mediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
+  if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
  }
  void showVideo(View v,WebChromeClient.CustomViewCallback cb){
   if(fullscreenVideo!=null){cb.onCustomViewHidden();return;}
@@ -663,26 +663,75 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    .setNegativeButton("Close",null).setPositiveButton("Check public IP",(d,n)->lookupPublicIp()).show();
  }
 
+ String mediaSourceScript(){
+  return "(function(){var out=[],seen={};"+
+   "document.querySelectorAll('video,audio').forEach(function(m){"+
+   "var sources=[m].concat(Array.from(m.querySelectorAll('source')));"+
+   "sources.forEach(function(x){var u=x===m?(m.currentSrc||m.src):x.src;"+
+   "if(!u||!/^https?:\\/\\//i.test(u)||seen[u])return;"+
+   "var typ=(x.getAttribute('type')||m.getAttribute('type')||'').toLowerCase();"+
+   "var path;try{path=new URL(u).pathname.toLowerCase()}catch(e){return}"+
+   "var audio=m.tagName.toLowerCase()==='audio'||typ.indexOf('audio/')===0||/\\.(mp3|m4a|aac|wav|ogg|opus|flac)$/.test(path);"+
+   "var video=typ.indexOf('video/')===0||/\\.(mp4|webm|mov|m4v|3gp)$/.test(path);"+
+   "if(!audio&&!video)return;"+
+   "seen[u]=1;var q=x.getAttribute('label')||x.getAttribute('res')||x.getAttribute('size')||'';"+
+   "if(!q&&m.videoHeight&&m.tagName.toLowerCase()==='video')q=m.videoHeight+'p';"+
+   "out.push({url:u,type:typ,kind:audio?'Audio':'Video',label:q});"+
+   "});});return JSON.stringify(out);})()";
+ }
+ JSONArray parseMediaSources(String raw){
+  JSONArray valid=new JSONArray();
+  try{
+   String decoded=new JSONArray("["+raw+"]").optString(0,"[]");
+   JSONArray found=new JSONArray(decoded);
+   for(int i=0;i<found.length();i++){
+    JSONObject o=found.optJSONObject(i);if(o==null)continue;
+    String link=o.optString("url");
+    if(!link.startsWith("https://")&&!link.startsWith("http://"))continue;
+    if(link.matches("(?i).*\\.(m3u8|mpd)(\\?.*)?$"))continue;
+    if(!"Video".equals(o.optString("kind"))&&!"Audio".equals(o.optString("kind")))continue;
+    valid.put(o);
+   }
+  }catch(Exception ignored){}
+  return valid;
+ }
+ void refreshMediaAvailability(){
+  if(!mediaPlaying||tabs.isEmpty())return;
+  WebView current=active();
+  current.evaluateJavascript(mediaSourceScript(),raw->{
+   if(tabs.isEmpty()||current!=active())return;
+   mediaAvailable=parseMediaSources(raw).length()>0;
+   updateMediaOverlay();
+  });
+ }
  void mediaDownloads(){
-  active().evaluateJavascript("(function(){var out=[];var seen={};document.querySelectorAll('video,audio').forEach(function(m){var sources=[m].concat(Array.from(m.querySelectorAll('source')));sources.forEach(function(x){var u=x.currentSrc||x.src;if(!u||!/^https?:/i.test(u)||seen[u])return;seen[u]=1;out.push({url:u,type:(x.type||m.tagName).toLowerCase(),label:x.getAttribute('label')||x.getAttribute('res')||x.getAttribute('size')||''});});});return JSON.stringify(out);})()",raw->{
-   try{
-    String decoded=new JSONArray("["+raw+"]").optString(0,"[]");JSONArray found=new JSONArray(decoded);
-    JSONArray valid=new JSONArray();ArrayList<String> names=new ArrayList<>();
-    for(int i=0;i<found.length();i++){
-     JSONObject o=found.optJSONObject(i);if(o==null)continue;String link=o.optString("url"),type=o.optString("type"),label=o.optString("label");
-     if(link.contains(".m3u8")||link.contains(".mpd"))continue;
-     if(!link.startsWith("http"))continue;
-     boolean audio=type.contains("audio")||link.matches("(?i).*\\.(mp3|m4a|aac|wav|ogg)(\\?.*)?$");
-     names.add((audio?"Audio":"Video")+" • "+(label.isEmpty()?"Original source":label));valid.put(o);
-    }
-    if(names.isEmpty()){dialog("Media downloads","This page does not expose a direct audio or video file. Some services, including YouTube, use streaming formats that cannot be downloaded or converted to MP3 through this browser feature.");return;}
-    themed().setTitle("Available media").setItems(names.toArray(new String[0]),(d,n)->{
-     JSONObject o=valid.optJSONObject(n);String link=o.optString("url");String mime=o.optString("type");
-     String filename=URLUtil.guessFileName(link,null,mime);
-     themed().setTitle("Download media?").setMessage(names.get(n)+"\n"+filename)
-      .setNegativeButton("Cancel",null).setPositiveButton("Download",(x,y)->startDownload(link,filename,mime)).show();
+  if(tabs.isEmpty())return;
+  active().evaluateJavascript(mediaSourceScript(),raw->{
+   JSONArray sources=parseMediaSources(raw);
+   if(sources.length()==0){
+    mediaAvailable=false;updateMediaOverlay();
+    dialog("Media downloads","No downloadable direct media source is available on this page. Streaming services may use segmented, protected, or inaccessible sources. MH Browser cannot offer resolutions or MP3 conversion unless a usable source is available.");
+    return;
+   }
+   ArrayList<String> labels=new ArrayList<>();
+   for(int i=0;i<sources.length();i++){
+    JSONObject item=sources.optJSONObject(i);
+    String label=item.optString("label");
+    labels.add(item.optString("kind")+(label.isEmpty()?" • Source file":" • "+label));
+   }
+   themed().setTitle("Download available media")
+    .setItems(labels.toArray(new String[0]),(d,which)->{
+     JSONObject item=sources.optJSONObject(which);
+     if(item==null)return;
+     String link=item.optString("url"),mime=item.optString("type");
+     if(mime.isEmpty())mime="application/octet-stream";
+     final String finalMime=mime;
+     String filename=URLUtil.guessFileName(link,null,finalMime);
+     themed().setTitle("Save media file")
+      .setMessage(labels.get(which)+"\n"+filename+"\n\nOnly the original available file will be downloaded. No audio conversion is performed.")
+      .setNegativeButton("Cancel",null)
+      .setPositiveButton("Download",(x,y)->startDownload(link,filename,finalMime)).show();
     }).setNegativeButton("Cancel",null).show();
-   }catch(Exception e){dialog("Media downloads","This page did not expose a supported direct media file.");}
   });
  }
  void lookupPublicIp(){
