@@ -37,7 +37,7 @@ public class MediaDownloadService extends Service {
   for(int k=0;k<a.length();k++){JSONObject item=a.optJSONObject(k);if(item==null||!task.equals(item.optString("task")))continue;
    String name=item.optString("name","Download");int percent=item.optInt("progress");
    save(task,name,pause?"Paused":"Downloading",percent,pause?"Paused by user":"Resuming…",null,null);
-   manager.notify(notificationId(task),notification(pause?"MH Browser • Paused":"MH Browser • Downloading",name,percent,true,false));break;
+   manager.notify(notificationId(task),notification(pause?"MH Browser • Paused":"MH Browser • Downloading",name,percent,true,false,task,pause));break;
   }
  }
  private static File partial(Context c,String task){
@@ -117,7 +117,7 @@ public class MediaDownloadService extends Service {
         int percent=total>0?(int)Math.min(99,Math.max(1,bytes*100/total)):1;
         String detail=total>0?(bytes/1024)+" / "+(total/1024)+" KB":(bytes/1024)+" KB received";
         save(task,name,"Downloading",percent,detail,null,null);
-        manager.notify(id,notification("MH Browser • Downloading",name+" • "+detail,percent,true,false));last=now;
+        manager.notify(id,notification("MH Browser • Downloading",name+" • "+detail,percent,true,false,task,false));last=now;
        }
       }
       out.flush();
@@ -171,7 +171,7 @@ public class MediaDownloadService extends Service {
    String filename=safeName(intent.getStringExtra("filename"));
    int id=notificationId(task);
    active.incrementAndGet();
-   startForeground(id,notification("MH Browser • Preparing download",filename,0,true,false));
+   startForeground(id,notification("MH Browser • Preparing download",filename,0,true,false,task,false));
    save(task,filename,"Preparing",0,"Connecting to website…",null,null);
    new Thread(()->runDirectDownload(task,id,startId,intent),"mh-file-download").start();
    return START_NOT_STICKY;
@@ -182,7 +182,7 @@ public class MediaDownloadService extends Service {
   int id=notificationId(task);
   active.incrementAndGet();
   // Android requires foreground service promotion promptly after startForegroundService.
-  startForeground(id,notification("MH Browser • Preparing download",choice.label,0,true,false));
+  startForeground(id,notification("MH Browser • Preparing download",choice.label,0,true,false,task,false));
   save(task,choice.label,"Preparing",0,"Connecting to media source…",null,null);
   MediaDownloadEngine.download(getApplicationContext(),url,choice,intent.getStringExtra("referer"),intent.getStringExtra("userAgent"),control,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
@@ -196,7 +196,7 @@ public class MediaDownloadService extends Service {
     boolean transferring=percent>0;
     String info=transferring?percent+"%"+(speed.isEmpty()?"":" • "+speed):shortText(line);
     save(task,choice.label,transferring?"Downloading":"Preparing",percent,transferring?speed:shortText(line),null,null);
-    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",info,percent,true,false));
+    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",info,percent,true,false,task,false));
    }
    @Override public void completed(String name,String uri,String mime){
     save(task,name,"Completed",100,"Download complete",uri,mime);
@@ -237,7 +237,8 @@ public class MediaDownloadService extends Service {
    .setVisibility(Notification.VISIBILITY_PRIVATE).build();
  }
  private static String shortText(String s){return s==null?"Unknown error":s.length()>100?s.substring(0,100):s;}
- private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed){
+ private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed){return notification(title,message,percent,ongoing,failed,null,false);}
+ private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed,String task,boolean paused){
   Intent open=new Intent(this,BrowserActivity.class);
   open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
   open.putExtra("openDownloads",true);
@@ -247,7 +248,13 @@ public class MediaDownloadService extends Service {
    .setContentTitle(title).setContentText(shortText(message))
    .setContentIntent(click).setAutoCancel(!ongoing).setOngoing(ongoing)
    .setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE);
-  if(ongoing)b.setProgress(100,percent,percent<=0);
+  if(ongoing){b.setProgress(100,percent,percent<=0);
+   if(task!=null&&!task.isEmpty()){
+    Intent action=new Intent(this,MediaDownloadService.class).setAction(paused?"MH_RESUME":"MH_PAUSE").putExtra("task",task);
+    PendingIntent command=PendingIntent.getService(this,notificationId(task),action,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+    b.addAction(new Notification.Action.Builder(android.R.drawable.ic_media_pause,paused?"Resume":"Pause",command).build());
+   }
+  }
   else b.setSmallIcon(failed?android.R.drawable.stat_notify_error:android.R.drawable.stat_sys_download_done);
   return b.build();
  }
