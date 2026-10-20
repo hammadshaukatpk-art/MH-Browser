@@ -1366,7 +1366,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(mediaFormatCache.containsKey(initialUrl)){
    verifiedFormats[0]=true;
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
-  }else state.setText("Checking the playing video and embedded players for actual video resolutions and audio formats…");
+  }else state.setText("Detecting actual video resolutions and audio formats from the playing video…");
   if(knownMediaPage&&!verifiedFormats[0]){
    TextView hint=text("Checking video formats… Exact resolutions appear after verification.",12,GRAY);
    hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
@@ -1387,6 +1387,15 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      dialog.dismiss();showMediaDownloadPanel(link,web);
     });
     if(i<2&&!verifiedFormats[0]){
+     if(quickOptions.getChildCount()==0){
+      TextView fallback=text("Embedded video found • checking exact qualities. You can try the options below while detection continues.",12,GRAY);
+      fallback.setPadding(dp(8),dp(8),0,dp(8));quickOptions.addView(fallback);
+      java.util.List<MediaDownloadEngine.Choice> possible=new ArrayList<>();
+      possible.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
+      possible.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
+      possible.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
+      addFormatChoices(quickOptions,link,possible,dialog);
+     }
      embeddedSearching[0]=true;
      inspectFormatsCached(link,new MediaFormatListener(){
       @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
@@ -1410,7 +1419,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   inspectFormatsCached(initialUrl,new MediaFormatListener(){
    @Override public void ready(String mediaTitle,java.util.List<MediaDownloadEngine.Choice> choices){
     if(!dialog.isShowing())return;
-    if(verifiedFormats[0]&&!mediaFormatCache.containsKey(initialUrl))return;
+    if(verifiedFormats[0])return;
     verifiedFormats[0]=true;
     state.setText("Available video and audio formats for: "+mediaTitle);
     quickOptions.removeAllViews();
