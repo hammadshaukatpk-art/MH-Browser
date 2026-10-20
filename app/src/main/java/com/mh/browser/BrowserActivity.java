@@ -1339,6 +1339,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   quickChoices.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
   quickChoices.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
   AlertDialog dialog=themed().setView(scroll).setNegativeButton("Close",null).create();
+  settingRow(layout,"↓  Downloads • Pause / Resume","View download progress and pause or resume active transfers",()->{
+   if(dialog.isShowing())dialog.dismiss();
+   if(fullscreenVideo!=null)hideVideo();
+   downloads();
+  });
   dialog.show();styleDialog(dialog);
   activeMediaDialog=dialog;activeDirectMediaOptions=directOptions;activeMediaPage=web.getUrl();
   dialog.setOnDismissListener(d->{
