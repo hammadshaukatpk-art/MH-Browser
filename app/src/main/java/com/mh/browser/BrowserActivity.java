@@ -1353,9 +1353,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
    dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),WindowManager.LayoutParams.WRAP_CONTENT);
    scroll.setLayoutParams(new android.widget.FrameLayout.LayoutParams(-1,-2));
+   scroll.setMinimumHeight(0);
   }
   final boolean[] verifiedFormats={false};
   final boolean[] embeddedSearching={false};
+  final boolean[] embeddedOptionsAdded={false};
   final String[] lastFormatError={""};
   boolean knownMediaPage=isMediaPage(initialUrl)||isNetworkMediaUrl(Uri.parse(initialUrl));
   if(mediaFormatCache.containsKey(initialUrl)){
@@ -1364,7 +1366,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
   }else state.setText("Checking playable video and audio formats. Available options appear below while detection runs…");
   if(!verifiedFormats[0]){
-   TextView hint=text("Checking exact resolutions… The options below are provisional until the media is inspected.",12,GRAY);
+   TextView hint=text("Best video and audio choices are available now; exact resolutions are shown only after the player exposes them.",12,GRAY);
    hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
    addFormatChoices(quickOptions,initialUrl,quickChoices,dialog);
   }
@@ -1384,14 +1386,16 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      dialog.dismiss();showMediaDownloadPanel(link,web);
     });
     if(i<6&&!verifiedFormats[0]){
-     if(!verifiedFormats[0]){
+     if(!embeddedOptionsAdded[0]){
+      embeddedOptionsAdded[0]=true;
+      quickOptions.removeAllViews();
       TextView fallback=text("Embedded video found • checking exact qualities. You can try the options below while detection continues.",12,GRAY);
       fallback.setPadding(dp(8),dp(8),0,dp(8));quickOptions.addView(fallback);
       java.util.List<MediaDownloadEngine.Choice> possible=new ArrayList<>();
       possible.add(new MediaDownloadEngine.Choice("Video • best available (unverified)",0,null));
       possible.add(new MediaDownloadEngine.Choice("Audio • MP3 (unverified)",0,"mp3"));
       possible.add(new MediaDownloadEngine.Choice("Audio • M4A (unverified)",0,"m4a"));
-      if(quickOptions.getChildCount()==0)addFormatChoices(quickOptions,link,possible,dialog);
+      addFormatChoices(quickOptions,link,possible,dialog);
      }
      embeddedSearching[0]=true;
      inspectFormatsCached(link,new MediaFormatListener(){
