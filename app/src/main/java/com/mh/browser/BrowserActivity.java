@@ -155,8 +155,7 @@ public class BrowserActivity extends Activity {
   }catch(Exception ignored){}}
  }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();
  // Private windows are an in-app transition, never replay the app launch splash.
- if(!privateOnly)showSplash();
- else root.requestApplyInsets();}
+ root.requestApplyInsets();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -1519,7 +1518,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void downloads(){
   showingSettings=true;screen=8;head.removeAllViews();body.removeAllViews();sectionHeader("Downloads",this::display);
-  ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(12),dp(15),dp(22));sc.addView(list);
+  ScrollView sc=new ScrollView(this);downloadsScrollView=sc;body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(12),dp(15),dp(22));sc.addView(list);
   String[] labels={"Today","Previous Day","Week","Monthly","Yearly","All","Choose date"};
   HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(false);list.addView(horizontal);
   LinearLayout filters=row();horizontal.addView(filters);
@@ -1573,7 +1572,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     TextView toggle=text(paused?"▶ Resume":"Ⅱ Pause",12,WHITE);
     toggle.setGravity(Gravity.CENTER);toggle.setPadding(dp(10),dp(12),dp(10),dp(12));
     toggle.setBackground(grad(0xff2373a8,0xff1a4f7a,10));card.addView(toggle);
-    toggle.setOnClickListener(v->{MediaDownloadService.setPaused(this,task,!paused);downloadUiHandler.postDelayed(this::refreshCompletedDownloadRows,300);});
+    toggle.setOnClickListener(v->{toggle.setEnabled(false);MediaDownloadService.setPaused(this,task,!paused);downloadUiHandler.postDelayed(this::refreshCompletedDownloadRows,450);});
    }
    if(status==DownloadManager.STATUS_SUCCESSFUL){
     View.OnClickListener openDownloaded=v->{
