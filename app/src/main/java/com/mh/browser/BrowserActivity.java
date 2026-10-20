@@ -147,7 +147,7 @@ public class BrowserActivity extends Activity {
  LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(0);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
  TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);return t;}
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
- @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);AdBlockRules.initialize(getApplicationContext());MediaEngineUpdater.check(getApplicationContext());CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
+ @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);MediaEngineUpdater.check(getApplicationContext());CookieManager.getInstance().setAcceptCookie(true);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
  if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
   String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
@@ -156,6 +156,9 @@ public class BrowserActivity extends Activity {
    ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{});
   }catch(Exception ignored){}}
  }if(privateOnly){CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();WebStorage.getInstance().deleteAllData();createTab(true);}else restoreTabs();
+ // Build and paint the browser before loading large ad-filter lists.
+ // Saved pages are restored only after those lists are ready, so ads do not slip through.
+ new Thread(()->{AdBlockRules.initialize(getApplicationContext());runOnUiThread(this::loadDeferredTabs);},"mh-adblock-startup").start();
  // Display the browser immediately without any custom splash delay.
  root.requestApplyInsets();
  if(!privateOnly&&getIntent()!=null&&getIntent().getBooleanExtra("openDownloads",false)){
@@ -967,11 +970,23 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }
   prefs.edit().putString("tabs",a.toString()).putInt("selectedTab",selectedNormal).apply();
  }
+ final ArrayList<String> deferredTabUrls=new ArrayList<>();
  void restoreTabs(){
   JSONArray a=prefs.getBoolean("restore",true)?readArray("tabs"):new JSONArray();
   if(a.length()==0){createTab(false);return;}
-  for(int i=0;i<a.length()&&i<12;i++){createTab(false);String u=a.optString(i,"about:blank");if(u.startsWith("http"))navigate(u);}
+  for(int i=0;i<a.length()&&i<12;i++){
+   createTab(false);
+   deferredTabUrls.add(a.optString(i,"about:blank"));
+  }
   index=Math.max(0,Math.min(tabs.size()-1,prefs.getInt("selectedTab",0)));display();
+ }
+ void loadDeferredTabs(){
+  if(isFinishing()||isDestroyed())return;
+  for(int i=0;i<deferredTabUrls.size()&&i<tabs.size();i++){
+   String u=deferredTabUrls.get(i);
+   if(u.startsWith("http"))tabs.get(i).web.loadUrl(u);
+  }
+  deferredTabUrls.clear();
  }
 
  void addHistory(String url,String title){
