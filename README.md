@@ -1,3 +1,15 @@
+
+## October 20, 2026 — media and browser UI improvements
+- Picture-in-Picture now attempts to isolate a playing HTML5 video directly in the WebView when the page has not entered fullscreen. Android 12+ can automatically enter PiP while playing. Results vary by website and must be tested on-device; YouTube background playback is not guaranteed.
+- A media download icon probes directly exposed HTTP(S) HTML5 video/audio sources and presents only the available original sources or source labels. It does **not** extract protected streaming media, promise unsupported quality options, or convert video to audio.
+- Download Manager jobs are recorded in a new Downloads page with Today, Previous Day, Week, Monthly, Yearly, All, and date picker filters. Existing downloads made before this update may not appear.
+- History now has explicit filter chips, defaulting to Today, and retains per-visit deletion and navigation-stack clearing.
+- Private browsing uses a dedicated Android process and WebView data directory on Android 9+. This separates private site storage from regular browsing, and private tabs are not written to the normal history. This is not a guarantee of anonymity from websites, network operators, or the operating system.
+- The Google G icon and Login Gmail label appear on both home layouts. Actual Google sign-in status and cross-app account synchronization are **not** implemented; the sign-in action uses an external browser.
+- Proxy configuration now includes protocol selection and optional session-only credentials. Proxy authentication depends on WebView support and is not guaranteed.
+- Network diagnostics show connection type, device local IPv4, device time zone, and device locale. Public IP and approximate location require explicit consent for a third-party ipwho.is lookup.
+- About screen identifies Version 1.0 and MH Developers (Masum DEV).
+
 # MH Browser — Android V1.0 (development preview)
 
 Android browser using Android System WebView (Chromium-based). Branded navy/cyan UI with horizontal tab strip, editable home shortcuts, tab switching, Google search, bookmarks and history, dark dialogs, settings and direct-file downloads.
