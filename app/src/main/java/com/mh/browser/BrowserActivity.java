@@ -354,7 +354,13 @@ public class BrowserActivity extends Activity {
   @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler handler,android.net.http.SslError error){
    handler.cancel(); // Never ignore certificate errors to force a video to play.
    String failing=error==null?null:error.getUrl();
-   recoverFailedVideoHost(v,failing,"SSL connection failed");
+   // A broken ad, image or video subresource must not kick users off a healthy page.
+   try{
+    Uri failed=Uri.parse(failing==null?"":failing);
+    Uri main=Uri.parse(v.getUrl()==null?"":v.getUrl());
+    if(failed.getHost()!=null&&failed.getHost().equalsIgnoreCase(main.getHost()))
+     recoverFailedVideoHost(v,failing,"SSL connection failed");
+   }catch(Exception ignored){}
   }
   @Override public void onReceivedError(WebView v,WebResourceRequest request,android.webkit.WebResourceError error){
    if(!request.isForMainFrame())return;
