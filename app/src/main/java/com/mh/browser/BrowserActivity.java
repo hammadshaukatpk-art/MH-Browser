@@ -52,6 +52,8 @@ public class BrowserActivity extends Activity {
  final Map<String,ProgressBar> downloadProgressViews=new HashMap<>();
  final Map<String,String> downloadRenderedStates=new HashMap<>();
  ScrollView downloadsScrollView;
+ int videoWidth=0,videoHeight=0,orientationBeforeVideo=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+ String detectedMediaTitle="",detectedMediaPage="";
  final Runnable downloadUiTick=new Runnable(){@Override public void run(){
   if(screen!=8||isFinishing()||isDestroyed())return;
   JSONArray entries=readArray("downloads");int count=0;
@@ -297,8 +299,20 @@ public class BrowserActivity extends Activity {
   @JavascriptInterface public boolean adBlockEnabled(){return prefs.getBoolean("adBlocker",true);}
   @JavascriptInterface public boolean popupsAllowed(){return prefs.getBoolean("popups",false);}
   @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;signalMediaFound(w);}});}
+  @JavascriptInterface public void mediaInfo(int width,int height,String title){
+   if(width<=0||height<=0||width>16384||height>16384)return;
+   String label=title==null?"":title.trim();
+   if(label.length()>180)label=label.substring(0,180);
+   final String detected=label;
+   runOnUiThread(()->{
+    if(tabs.isEmpty()||w!=active())return;
+    videoWidth=width;videoHeight=height;
+    if(!detected.isEmpty()){detectedMediaTitle=detected;detectedMediaPage=w.getUrl();}
+    if(fullscreenVideo!=null)applyVideoOrientation();
+   });
+  }
   @JavascriptInterface public void found(){runOnUiThread(()->signalMediaFound(w));}
-  @JavascriptInterface public void pageChanged(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;mediaAvailable=isMediaPage(w.getUrl());updateMediaOverlay();if(mediaAvailable)prefetchMediaFormats(w.getUrl());}});}
+  @JavascriptInterface public void pageChanged(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;videoWidth=0;videoHeight=0;detectedMediaTitle="";detectedMediaPage="";mediaAvailable=isMediaPage(w.getUrl());updateMediaOverlay();if(mediaAvailable)prefetchMediaFormats(w.getUrl());}});}
   @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
   @JavascriptInterface public void playerTap(){recentPlayerTap.put(w,SystemClock.elapsedRealtime());}
   @JavascriptInterface public void candidateWithRef(String link,String referer){
@@ -807,8 +821,27 @@ public class BrowserActivity extends Activity {
   if(mediaOverlay!=null)mediaOverlay.setVisibility(mediaPlaying||mediaAvailable||(!tabs.isEmpty()&&isMediaPage(active().getUrl()))?View.VISIBLE:View.GONE);
   if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(View.VISIBLE);
  }
+ void applyVideoOrientation(){
+  if(fullscreenVideo==null)return;
+  boolean portrait=videoWidth>0&&videoHeight>0?videoWidth<=videoHeight:isVerticalMediaPage(tabs.isEmpty()?"":active().getUrl());
+  if(videoWidth<=0&&!portrait)return; // Wait for real media dimensions on ordinary pages.
+  int desired=portrait?android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+  if(getRequestedOrientation()!=desired)setRequestedOrientation(desired);
+ }
+ boolean isVerticalMediaPage(String url){
+  if(url==null)return false;
+  try{
+   Uri u=Uri.parse(url);String host=u.getHost()==null?"":u.getHost().toLowerCase(Locale.ROOT);
+   String path=u.getPath()==null?"":u.getPath().toLowerCase(Locale.ROOT);
+   return (host.contains("youtube.com")&&path.startsWith("/shorts/"))||
+    (host.contains("instagram.com")&&(path.startsWith("/reel/")||path.startsWith("/reels/")))||
+    (host.contains("facebook.com")&&path.startsWith("/reel/"))||
+    (host.contains("tiktok.com")&&path.contains("/video/"));
+  }catch(Exception ignored){return false;}
+ }
  void showVideo(View v,WebChromeClient.CustomViewCallback cb){
   if(fullscreenVideo!=null){cb.onCustomViewHidden();return;}
+  orientationBeforeVideo=getRequestedOrientation();
   fullscreenVideo=v;fullscreenCallback=cb;
   videoLayer=new FrameLayout(this);videoLayer.setBackgroundColor(Color.BLACK);
   if(v.getParent() instanceof ViewGroup)((ViewGroup)v.getParent()).removeView(v);
@@ -821,6 +854,8 @@ public class BrowserActivity extends Activity {
   ((ViewGroup)getWindow().getDecorView()).addView(videoLayer,new ViewGroup.LayoutParams(-1,-1));
   getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   getWindow().getDecorView().setSystemUiVisibility(5894|1024|512);
+  applyVideoOrientation();
+  if(!tabs.isEmpty())active().evaluateJavascript("if(window.mhMediaScan)window.mhMediaScan();",null);
  }
  void hideVideo(){
   if(fullscreenVideo==null)return;
@@ -830,6 +865,7 @@ public class BrowserActivity extends Activity {
   if(cb!=null)cb.onCustomViewHidden();
   getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   getWindow().getDecorView().setSystemUiVisibility(0);
+  setRequestedOrientation(orientationBeforeVideo);
  }
  class MhDialogBuilder extends AlertDialog.Builder {
  MhDialogBuilder(){super(BrowserActivity.this,android.R.style.Theme_Material_Dialog_Alert);}
