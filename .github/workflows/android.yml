@@ -121,3 +121,24 @@ jobs:
               sleep 8
             done
           done
+
+      - name: Publish GeckoView beta APKs without changing production
+        if: github.event_name == 'pull_request' && github.head_ref == 'geckoview-engine-migration'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="v1.0-geckoview-beta-20261020"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "${{ github.event.pull_request.head.sha }}" --title "MH Browser GeckoView Beta - Experimental" --notes "Experimental Firefox-based GeckoView engine. Stronger extension and Gecko tracking protection, tabs, private browsing, bookmarks, history, basic downloads and embedded media detection. This beta does NOT yet guarantee full parity with the production WebView app or zero ads, and protected streams are not downloadable. Production remains unchanged." --prerelease --latest=false
+          fi
+          for apk in app/build/outputs/apk/debug/*.apk; do
+            case "$apk" in
+              *arm64-v8a*) dest="MH-Browser-GeckoView-Beta-ARM64.apk" ;;
+              *armeabi-v7a*) dest="MH-Browser-GeckoView-Beta-ARMv7.apk" ;;
+              *x86_64*) dest="MH-Browser-GeckoView-Beta-x86_64.apk" ;;
+              *) continue ;;
+            esac
+            cp "$apk" "$dest"
+            gh release upload "$TAG" "$dest" --clobber
+          done
