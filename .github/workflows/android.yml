@@ -41,9 +41,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-advertising-name-fix"
+          TAG="v1.0-media-20261020-whatsapp-icon"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Hammad Contact Correction" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Adds a centered Advertising - MH Browser support dialog with WhatsApp contact links for Hammad and Masoom and a thank-you footer. Keeps Facebook videos in browser, smooth navigation, branded downloads, private tabs, and YouTube downloader. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - WhatsApp Icon Correction" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Corrects the WhatsApp icon to an accurate vector logo in the Advertising - MH Browser support dialog, retaining Hammad and Masoom contact links and the thank-you footer. Keeps Facebook videos in browser, smooth navigation, branded downloads, private tabs, and YouTube downloader. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
