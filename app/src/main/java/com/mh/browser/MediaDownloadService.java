@@ -52,7 +52,7 @@ public class MediaDownloadService extends Service {
     lastWriteByTask.put(task,now);
     String speed=extractSpeed(line);
     String info=percent+"%"+(speed.isEmpty()?"":" • "+speed);
-    save(task,choice.label,"Downloading",percent,info,null,null);
+    save(task,choice.label,"Downloading",percent,speed,null,null);
     manager.notify(id,notification("MH Browser • Downloading",info,percent,true,false));
    }
    @Override public void completed(String name,String uri,String mime){
@@ -83,17 +83,10 @@ public class MediaDownloadService extends Service {
   return m.find()?m.group(1):"";
  }
  private Notification completedNotification(String task,String name,String uri,String mime){
-  Intent play=new Intent(this,DownloadedMediaActivity.class);
-  play.setAction("com.mh.browser.OPEN_DOWNLOAD."+task);
-  play.setDataAndType(android.net.Uri.parse(uri),mime);
-  play.putExtra("name",name);
-  play.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_GRANT_READ_URI_PERMISSION);
-  play.setClipData(ClipData.newRawUri("Downloaded media",android.net.Uri.parse(uri)));
-  PendingIntent click=PendingIntent.getActivity(this,notificationId(task),play,
-    PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+  PendingIntent click=MediaOpenHelper.notificationClick(this,notificationId(task),uri,mime,name);
   Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
   return b.setSmallIcon(android.R.drawable.stat_sys_download_done)
-   .setContentTitle("Download complete • Tap to play")
+   .setContentTitle("Download complete • Tap to play externally")
    .setContentText(shortText(name)).setContentIntent(click)
    .setAutoCancel(true).setOnlyAlertOnce(true)
    .setVisibility(Notification.VISIBILITY_PRIVATE).build();
