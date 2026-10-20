@@ -39,6 +39,21 @@ public final class MediaDownloadEngine {
  // A single in-flight extractor run per video. The download worker can reuse
  // the prefetch rather than launching a second costly yt-dlp extraction.
  private static final ConcurrentHashMap<String,CountDownLatch> INSPECT_IN_FLIGHT=new ConcurrentHashMap<>();
+ // Warm the native download tools while the user is watching, not after they tap a quality.
+ private static final java.util.concurrent.atomic.AtomicBoolean WARMING=new java.util.concurrent.atomic.AtomicBoolean();
+ public static void warmup(Context context){
+  if(!WARMING.compareAndSet(false,true))return;
+  Context app=context.getApplicationContext();
+  new Thread(()->{
+   boolean acquired=false;
+   try{
+    MediaEngineUpdater.acquireUse(app);acquired=true;
+    FFmpeg.getInstance().init(app);
+   }catch(Exception ignored){WARMING.set(false);}
+   finally{if(acquired)MediaEngineUpdater.releaseUse();}
+  },"mh-media-warmup").start();
+ }
+
  public static final class Choice {
   public final String label;
   public final int height;
@@ -198,9 +213,10 @@ public final class MediaDownloadEngine {
    File staging=null;
    boolean acquired=false;
    try{
-    callback.progress(0,"Preparing latest media extractor…");
+    callback.progress(0,"Initializing download engine…");
     MediaEngineUpdater.acquireUse(context);acquired=true;
     callback.progress(0,"Connecting to media source…");
+    // Usually already initialized during playback; this is an idempotent safety fallback.
     FFmpeg.getInstance().init(context.getApplicationContext());
     File root=context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
     if(root==null)throw new IllegalStateException("Download storage is unavailable");
