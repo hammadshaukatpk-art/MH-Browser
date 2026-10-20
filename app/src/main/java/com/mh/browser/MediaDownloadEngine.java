@@ -42,8 +42,9 @@ public final class MediaDownloadEngine {
  }
  public static void inspect(Context context,String url,Callback callback){
   new Thread(()->{
+   boolean acquired=false;
    try{
-    YoutubeDL.getInstance().init(context.getApplicationContext());
+    MediaEngineUpdater.acquireUse(context);acquired=true;
     YoutubeDLRequest infoRequest=new YoutubeDLRequest(url);
     infoRequest.addOption("--no-playlist");
     VideoInfo info=YoutubeDL.getInstance().getInfo(infoRequest);
@@ -63,14 +64,18 @@ public final class MediaDownloadEngine {
     choices.add(new Choice("Audio • M4A (best available)",0,"m4a"));
     String title=info.getTitle();
     callback.ready(title==null?"Available formats":title,choices);
-   }catch(Exception ex){callback.failed("Could not inspect available formats. The website may require authentication, restrict downloads, or have changed its streaming format. "+safeError(ex));}
+   }catch(Exception ex){callback.failed("Could not inspect formats: "+safeError(ex));}
+   finally{if(acquired)MediaEngineUpdater.releaseUse();}
   },"mh-media-inspect").start();
  }
  public static void download(Context context,String url,Choice choice,Callback callback){
   new Thread(()->{
    File staging=null;
+   boolean acquired=false;
    try{
-    YoutubeDL.getInstance().init(context.getApplicationContext());
+    callback.progress(0,"Preparing latest media extractor…");
+    MediaEngineUpdater.acquireUse(context);acquired=true;
+    callback.progress(0,"Connecting to media source…");
     FFmpeg.getInstance().init(context.getApplicationContext());
     File root=context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
     if(root==null)throw new IllegalStateException("Download storage is unavailable");
@@ -132,7 +137,7 @@ public final class MediaDownloadEngine {
     Uri saved=publish(context,result,mime);
     callback.completed(result.getName(),saved.toString(),mime);
    }catch(Exception ex){callback.failed("Download failed. "+safeError(ex));}
-   finally{if(staging!=null)deleteTree(staging);}
+   finally{if(staging!=null)deleteTree(staging);if(acquired)MediaEngineUpdater.releaseUse();}
   },"mh-media-download").start();
  }
  private static Uri publish(Context context,File source,String mime)throws Exception{
@@ -173,8 +178,14 @@ public final class MediaDownloadEngine {
  }
  private static String safeError(Exception e){
   String message=e.getMessage();
-  if(message==null||message.isEmpty())return "Please try another video.";
+  if(message==null||message.isEmpty())return e.getClass().getSimpleName();
   message=message.replaceAll("(?i)(cookie|authorization|token)=[^\\s&]+","$1=[hidden]");
-  return message.length()>230?message.substring(0,230):message;
+  // yt-dlp often writes stale-version warnings before the actual fatal error.
+  // Surface the last ERROR line instead of misleading users with the warning.
+  String[] lines=message.split("\\r?\\n");
+  String actual=null;
+  for(String line:lines)if(line.trim().startsWith("ERROR:"))actual=line.trim();
+  if(actual!=null)message=actual;
+  return message.length()>600?message.substring(message.length()-600):message;
  }
 }
