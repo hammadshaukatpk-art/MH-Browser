@@ -32,13 +32,13 @@ public class BrowserActivity extends Activity {
  GradientDrawable bg(int color){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(24);return g;}
  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("mh",0);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
  root=column();root.setBackgroundColor(BG);setContentView(root);if(Build.VERSION.SDK_INT>=35){root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets z=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(z.left,z.top,z.right,z.bottom);return insets;});}getWindow().getDecorView().setSystemUiVisibility(0);head=column();root.addView(head);body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));bar=row();bar.setBackgroundColor(PANEL);root.addView(bar);
- restoreTabs();if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
+ if(prefs.getBoolean("proxyActive",false)&&WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)){
   String host=prefs.getString("proxyHost",""),port=prefs.getString("proxyPort","");
   if(!host.isEmpty()&&!port.isEmpty()){try{
    ProxyConfig config=new ProxyConfig.Builder().addProxyRule("http://"+host+":"+port).build();
-   ProxyController.getInstance().setProxyOverride(config,getMainExecutor(),()->{});
+   ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{});
   }catch(Exception ignored){}}
- }showSplash();}
+ }restoreTabs();showSplash();}
 
  int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
  GradientDrawable grad(int a,int b,int radius){GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{a,b});g.setCornerRadius(dp(radius));return g;}
@@ -418,7 +418,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }
   AlertDialog d=themed().setTitle("Proxy settings").setView(c)
    .setNegativeButton("Cancel",null)
-   .setNeutralButton("Disable proxy",(x,n)->ProxyController.getInstance().clearProxyOverride(getMainExecutor(),()->{
+   .setNeutralButton("Disable proxy",(x,n)->ProxyController.getInstance().clearProxyOverride((command)->runOnUiThread(command),()->{
      prefs.edit().putBoolean("proxyActive",false).apply();Toast.makeText(this,"Proxy disabled",Toast.LENGTH_SHORT).show();
    }))
    .setPositiveButton("Apply proxy",null).create();
@@ -428,7 +428,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    int number;try{number=Integer.parseInt(p);}catch(Exception e){port.setError("Invalid port");return;}
    if(number<1||number>65535){port.setError("Port must be 1–65535");return;}
    ProxyConfig config=new ProxyConfig.Builder().addProxyRule("http://"+h+":"+number).build();
-   ProxyController.getInstance().setProxyOverride(config,getMainExecutor(),()->{
+   ProxyController.getInstance().setProxyOverride(config,(command)->runOnUiThread(command),()->{
     prefs.edit().putString("proxyHost",h).putString("proxyPort",p).putBoolean("proxyActive",true).apply();
     Toast.makeText(this,"HTTP proxy applied to WebView",Toast.LENGTH_LONG).show();
    });d.dismiss();
