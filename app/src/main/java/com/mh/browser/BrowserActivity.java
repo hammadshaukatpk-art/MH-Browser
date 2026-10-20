@@ -938,6 +938,29 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(l,"Network diagnostics","View active connection type",this::network);
   settingRow(l,"Browsing history","View and delete visits by date",this::history);
   settingRow(l,"Browser engine","Android System WebView",()->dialog("Browser engine","MH Browser uses the installed Android System WebView, which is Chromium-based."));
+  settingRow(l,"Update media download engine","Refresh supported website extractors (internet required)",this::updateMediaEngine);
+ }
+
+ void updateMediaEngine(){
+  themed().setTitle("Update media engine")
+   .setMessage("Download the latest stable media extractor from the yt-dlp project? This updates only the media download component and requires internet access.")
+   .setNegativeButton("Cancel",null)
+   .setPositiveButton("Update",(d,n)->{
+    AlertDialog wait=themed().setTitle("Updating media engine").setMessage("Checking for a stable update…").create();
+    wait.show();styleDialog(wait);
+    new Thread(()->{
+     String message;
+     try{
+      com.yausername.youtubedl_android.YoutubeDL engine=com.yausername.youtubedl_android.YoutubeDL.getInstance();
+      engine.init(getApplicationContext());
+      Object result=engine.updateYoutubeDL(getApplicationContext(),
+       new com.yausername.youtubedl_android.YoutubeDL.UpdateChannel("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"));
+      message="Media engine update finished: "+String.valueOf(result);
+     }catch(Exception e){message="Update could not complete: "+String.valueOf(e.getMessage());}
+     final String done=message;
+     runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){wait.dismiss();dialog("Media engine",done);}});
+    },"mh-media-update").start();
+   }).show();
  }
  void sectionHeader(String label,Runnable back){
  LinearLayout r=row();r.setPadding(dp(10),dp(12),dp(14),dp(12));r.setBackground(grad(0xff102940,0xff071326,12));head.addView(r);
