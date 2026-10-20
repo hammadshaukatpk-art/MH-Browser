@@ -41,9 +41,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-instant-panel"
+          TAG="v1.0-media-20261020-private-tabs"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Instant Media Panel" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Instant quality selection without a blocking spinner, direct media links prioritized when available, prewarms download engine on playback, and reuses cached metadata to avoid repeated extraction. Separates preparing from real transfer in download notifications. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Private Tab Navigation" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Private browsing now skips the startup splash and uses no transition animation. Closing the final private tab returns to the existing main browser instead of creating another private tab. Also retains instant quality choices, direct media downloads, and media engine prewarming. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
           fi
           for apk in app/build/outputs/apk/debug/*.apk; do
             case "$apk" in
