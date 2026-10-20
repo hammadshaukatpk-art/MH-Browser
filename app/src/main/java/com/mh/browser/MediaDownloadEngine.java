@@ -104,7 +104,7 @@ public final class MediaDownloadEngine {
      if(result==null||f.length()>result.length())result=f;
     }
     if(result==null||result.length()==0)throw new IllegalStateException("No finished media file was produced");
-    String mime="audio/mp3".equals(choice.audioFormat)?"audio/mpeg":
+    String mime="mp3".equals(choice.audioFormat)?"audio/mpeg":
       "m4a".equals(choice.audioFormat)?"audio/mp4":
       result.getName().endsWith(".webm")?"video/webm":"video/mp4";
     Uri saved=publish(context,result,mime);
