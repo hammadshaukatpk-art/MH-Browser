@@ -291,7 +291,7 @@ public class BrowserActivity extends Activity {
  }
  CookieManager.getInstance().setAcceptThirdPartyCookies(w,!inc&&!prefs.getBoolean("blockCookies",true));
  w.setDownloadListener((link,userAgent,disposition,mime,length)->{
-  String filename=URLUtil.guessFileName(link,disposition,mime);
+  String filename=(mime!=null&&(mime.startsWith("video/")||mime.startsWith("audio/")))?mediaFilename(link,mime):URLUtil.guessFileName(link,disposition,mime);
   themed().setTitle("Download file").setMessage(filename+" • "+(length>0?(length/1024)+" KB":"Size unknown"))
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
@@ -1408,6 +1408,30 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
   });
  }
+ String mediaTitleForDownload(String pageUrl){
+  String title="";
+  if(pageUrl!=null&&pageUrl.equals(detectedMediaPage))title=detectedMediaTitle;
+  if(title.isEmpty()&&pageUrl!=null)title=mediaTitleCache.getOrDefault(pageUrl,"");
+  if(title.isEmpty()&&!tabs.isEmpty())title=active().getTitle();
+  if(title==null)return "";
+  title=title.replaceFirst("(?i)\\s*[-|•]\\s*(YouTube|Facebook|Instagram|TikTok|Vimeo)\\s*$","").trim();
+  if(title.matches("(?i)^(YouTube|Facebook|Instagram|TikTok|Video|Watch|Home|Available formats|Media|Player|MH Browser)$"))return "";
+  title=title.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]"," ").replaceAll("\\s+"," ").trim();
+  if(title.length()>140)title=title.substring(0,140).trim();
+  return title.replaceAll("[. ]+$","");
+ }
+ String mediaFilename(String link,String mime){
+  String fallback=URLUtil.guessFileName(link,null,mime);
+  String title=mediaTitleForDownload(tabs.isEmpty()?null:active().getUrl());
+  if(title.isEmpty())return fallback;
+  int dot=fallback.lastIndexOf('.');
+  String ext=dot>=0?fallback.substring(dot+1).toLowerCase(Locale.ROOT):"";
+  if(!ext.matches("mp4|m4v|webm|mov|mkv|mp3|m4a|aac|wav|ogg|opus|flac|3gp")){
+   String m=mime==null?"":mime.toLowerCase(Locale.ROOT);
+   ext=m.contains("audio/mpeg")?"mp3":m.contains("audio/mp4")?"m4a":m.contains("webm")?"webm":m.contains("ogg")?"ogg":m.startsWith("audio/")?"m4a":"mp4";
+  }
+  return title+"."+ext;
+ }
  void showDirectChoices(LinearLayout container,JSONArray direct,AlertDialog dialog){
   container.removeAllViews();
   if(direct==null||direct.length()==0)return;
@@ -1428,7 +1452,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      MediaDownloadService.enqueue(getApplicationContext(),link,
       new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent);
      Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
-    }else startDownload(link,URLUtil.guessFileName(link,null,mime),mime,source.optString("referer",""));
+    }else startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
    });
   }
  }
@@ -1463,7 +1487,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    .setItems(labels.toArray(new String[0]),(d,which)->{
     JSONObject item=sources.optJSONObject(which);if(item==null)return;
     String link=item.optString("url"),mime=item.optString("type");
-    String filename=URLUtil.guessFileName(link,null,mime);
+    String filename=mediaFilename(link,mime);
     themed().setTitle("Save original file?").setMessage(filename)
      .setNegativeButton("Cancel",null)
      .setPositiveButton("Download",(x,y)->startDownload(link,filename,mime)).show();
