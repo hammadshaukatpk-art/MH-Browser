@@ -49,7 +49,7 @@ public class BrowserActivity extends Activity {
    ProgressBar progress=downloadProgressViews.get(task);
    if(status!=null){
     String state=item.optString("state","Pending");
-    status.setText(state+" • "+item.optInt("progress",0)+"% • "+item.optString("detail",""));
+    status.setText(state+" • "+item.optInt("progress",0)+"%"+cleanDownloadDetail(item.optString("detail","")));
    }
    if(progress!=null){progress.setProgress(item.optInt("progress",0));
     progress.setVisibility("Downloading".equals(item.optString("state"))?View.VISIBLE:View.GONE);}
@@ -951,6 +951,14 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     }).start();
    }).show();
  }
+ // Old saved download records sometimes contain a second percentage in their detail.
+ // Keep exactly one percent in the UI, followed by optional speed/status text.
+ String cleanDownloadDetail(String detail){
+  if(detail==null)return "";
+  String clean=detail.trim().replaceFirst("^\\d{1,3}%\\s*(?:[•|\\-]\\s*)?","");
+  if(clean.isEmpty()||clean.equals("Download complete"))return "";
+  return " • "+clean;
+ }
  void downloads(){
   showingSettings=true;screen=8;head.removeAllViews();body.removeAllViews();sectionHeader("Downloads",this::display);
   ScrollView sc=new ScrollView(this);body.addView(sc);LinearLayout list=column();list.setPadding(dp(15),dp(12),dp(15),dp(22));sc.addView(list);
@@ -990,7 +998,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(cursor!=null&&cursor.moveToFirst())status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
    }catch(Exception ignored){}
    String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":status==DownloadManager.STATUS_FAILED?"Failed":status==DownloadManager.STATUS_RUNNING?"Downloading":"Pending";
-   TextView statusLine=text(date+" • "+state+(id==-2?" • "+item.optInt("progress",0)+"% • "+item.optString("detail",""):""),12,GRAY);
+   TextView statusLine=text(date+" • "+state+(id==-2?" • "+item.optInt("progress",0)+"%"+cleanDownloadDetail(item.optString("detail","")):""),12,GRAY);
    info.addView(statusLine);
    if(id==-2){
     String task=item.optString("task");downloadStatusViews.put(task,statusLine);
@@ -1012,11 +1020,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
        android.webkit.MimeTypeMap.getFileExtensionFromUrl(name).toLowerCase(Locale.ROOT));
       if(mime==null)mime="video/mp4";
      }
-     Intent play=new Intent(this,DownloadedMediaActivity.class);
-     play.setDataAndType(uri,mime);play.putExtra("name",name);
-     play.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-     play.setClipData(ClipData.newRawUri("Downloaded media",uri));
-     startActivity(play);
+     MediaOpenHelper.open(this,uri,mime,name);
     }catch(Exception e){dialog("Open download","Unable to open the saved file: "+e.getMessage());}
    });
   }
