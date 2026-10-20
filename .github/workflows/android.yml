@@ -96,7 +96,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          TAG="v1.0-media-20261020-frame-guard-media-v8"
+          TAG="v1.0-media-20261020-frame-guard-media-v9"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --target "$GITHUB_SHA" --title "MH Browser V1.0 - Frame-level Ad Guard and Media Detection" --notes "Direct Android APK downloads. Use ARM64 for most modern Android phones. Keeps Ad Blocker enabled by default, adds EasyList/EasyPrivacy domain-only filters, blocks known ad landing redirects and unwanted new-window popups, and detects more embedded video/audio streams with referrer headers. Retains existing WhatsApp contacts, navigation, video recovery and downloads. Keeps Facebook videos in browser, smooth navigation, branded downloads, private tabs, and YouTube downloader. Preserves automatic background extractor updates, foreground downloading, progress notifications, and Open button. YouTube and network delays are not eliminated; real-device testing required." --latest=false
           fi
