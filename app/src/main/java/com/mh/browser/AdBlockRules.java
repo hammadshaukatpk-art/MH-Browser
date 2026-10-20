@@ -22,6 +22,7 @@ import java.util.Set;
 final class AdBlockRules {
  private static volatile Set<String> blockedHosts=Collections.emptySet();
  private static volatile Map<String,List<String>> hostPaths=Collections.emptyMap();
+ private static volatile Set<String> filterHosts=Collections.emptySet();
  private static final String[] AD_HOSTS={
   "doubleclick.net","googlesyndication.com","googleadservices.com",
   "adnxs.com","adsrvr.org","criteo.com","criteo.net","taboola.com",
@@ -74,6 +75,16 @@ final class AdBlockRules {
      paths.computeIfAbsent(host,k->new ArrayList<>()).add(path);
    }
   }catch(Exception ignored){}
+  try(BufferedReader r=new BufferedReader(new InputStreamReader(
+      context.getApplicationContext().getAssets().open("ad_filter_hosts.txt"),"UTF-8"))){
+   String line;
+   Set<String> domains=new HashSet<>();
+   while((line=r.readLine())!=null){
+    String h=line.trim().toLowerCase(Locale.ROOT);
+    if(h.length()>3&&h.length()<240&&!h.contains("/")&&!h.contains(" "))domains.add(h);
+   }
+   filterHosts=Collections.unmodifiableSet(domains);
+  }catch(Exception ignored){}
   blockedHosts=Collections.unmodifiableSet(hosts);
   hostPaths=Collections.unmodifiableMap(paths);
  }
@@ -100,6 +111,22 @@ final class AdBlockRules {
   }
   return false;
  }
+ private static boolean filterDomain(String host){
+  Set<String> list=filterHosts;
+  if(list.contains(host))return true;
+  for(int i=host.indexOf('.');i>=0;i=host.indexOf('.',i+1))
+   if(list.contains(host.substring(i+1)))return true;
+  return false;
+ }
+ /** Stop known ad/tracker landing pages even when a click attempts top-level navigation. */
+ static boolean shouldBlockNavigation(Uri uri,boolean ads){
+  if(!ads||uri==null)return false;
+  String scheme=uri.getScheme(),host=uri.getHost();
+  if(host==null||(!"http".equalsIgnoreCase(scheme)&&!"https".equalsIgnoreCase(scheme)))return false;
+  host=host.toLowerCase(Locale.ROOT);
+  if(matches(host,MEDIA_HOSTS)||matches(host,TRUSTED_SOCIAL))return false;
+  return matches(host,AD_HOSTS)||blockedDomain(host)||filterDomain(host);
+ }
  static boolean shouldBlock(WebResourceRequest request,String pageUrl,boolean ads,boolean trackers){
   if(request==null||request.isForMainFrame()||(!ads&&!trackers))return false;
   Uri url=request.getUrl();
@@ -123,7 +150,7 @@ final class AdBlockRules {
   if(ads&&blockedPath(host,path))return true;
   if(firstParty)return false;
   if(matches(host,TRUSTED_SOCIAL))return false;
-  return (ads&&(matches(host,AD_HOSTS)||blockedDomain(host)))
+  return (ads&&(matches(host,AD_HOSTS)||blockedDomain(host)||filterDomain(host)))
     ||(trackers&&matches(host,TRACKERS));
  }
  static String cosmeticScript(){
