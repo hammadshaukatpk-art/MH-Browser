@@ -1009,20 +1009,24 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     p.setVisibility(status==DownloadManager.STATUS_RUNNING?View.VISIBLE:View.GONE);
     downloadProgressViews.put(task,p);
    }
-   if(status==DownloadManager.STATUS_SUCCESSFUL)card.setOnClickListener(v->{
-    try{
-     Uri uri=id<0?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);
-     if(uri==null)throw new IllegalStateException("Missing saved file URI");
-     String mime=item.optString("mime","");
-     if(mime.isEmpty()||mime.equals("*/*")){
-      mime=getContentResolver().getType(uri);
-      if(mime==null)mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-       android.webkit.MimeTypeMap.getFileExtensionFromUrl(name).toLowerCase(Locale.ROOT));
-      if(mime==null)mime="video/mp4";
-     }
-     MediaOpenHelper.open(this,uri,mime,name);
-    }catch(Exception e){dialog("Open download","Unable to open the saved file: "+e.getMessage());}
-   });
+   if(status==DownloadManager.STATUS_SUCCESSFUL){
+    View.OnClickListener openDownloaded=v->{
+     try{
+      String savedUri=item.optString("uri","");
+      Uri uri=id<0?(savedUri.isEmpty()?null:Uri.parse(savedUri)):dm.getUriForDownloadedFile(id);
+      if(uri==null)throw new IllegalStateException("Saved file link is missing");
+      MediaOpenHelper.open(this,uri,item.optString("mime",""),name);
+     }catch(Exception e){dialog("Open download","Unable to open the saved file: "+e.getMessage());}
+    };
+    card.setClickable(true);
+    card.setOnClickListener(openDownloaded);
+    TextView openButton=text("▶  Open",13,WHITE);
+    openButton.setGravity(Gravity.CENTER);
+    openButton.setPadding(dp(10),dp(12),dp(10),dp(12));
+    openButton.setBackground(grad(0xff2373a8,0xff1a4f7a,10));
+    card.addView(openButton);
+    openButton.setOnClickListener(openDownloaded);
+   }
   }
   if(shown==0){TextView empty=text("No downloads for this period",16,GRAY);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(8),dp(55),dp(8),dp(40));list.addView(empty);}
   downloadUiHandler.postDelayed(downloadUiTick,900);
