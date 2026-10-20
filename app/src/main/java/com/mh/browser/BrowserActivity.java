@@ -1107,17 +1107,21 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void startDownload(String link,String filename,String mime){
   try{
-   Uri u=Uri.parse(link);if(!"https".equals(u.getScheme())&&!"http".equals(u.getScheme())){dialog("Download unavailable","Only HTTP/HTTPS files are supported.");return;}
-   DownloadManager.Request req=new DownloadManager.Request(u);
-   req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-   req.setTitle(filename);if(mime!=null&&!mime.isEmpty())req.setMimeType(mime);
-   String cookie=CookieManager.getInstance().getCookie(link);if(cookie!=null&&!cookie.isEmpty()&&!tabs.get(index).incognito)req.addRequestHeader("Cookie",cookie);
-   req.addRequestHeader("User-Agent",active().getSettings().getUserAgentString());
-   req.setDestinationInExternalFilesDir(this,Environment.DIRECTORY_DOWNLOADS,filename);
-   long id=((DownloadManager)getSystemService(DOWNLOAD_SERVICE)).enqueue(req);
-   JSONArray a=readArray("downloads");JSONObject entry=new JSONObject();entry.put("id",id);entry.put("name",filename);entry.put("mime",mime==null?"*/*":mime);entry.put("time",System.currentTimeMillis());a.put(entry);storeArray("downloads",a);
-   Toast.makeText(this,"Download started",Toast.LENGTH_SHORT).show();
-  }catch(Exception e){dialog("Download failed","The file could not be queued.");}
+   Uri u=Uri.parse(link);
+   if(!"https".equalsIgnoreCase(u.getScheme())&&!"http".equalsIgnoreCase(u.getScheme())){
+    dialog("Download unavailable","Only HTTP/HTTPS files are supported.");return;
+   }
+   WebView current=tabs.isEmpty()?null:active();
+   String agent=current==null?"MH Browser":current.getSettings().getUserAgentString();
+   String referer=current==null?"":current.getUrl();
+   String cookie=CookieManager.getInstance().getCookie(link);
+   // Use our own foreground download service for website files, just like media.
+   // Do not enqueue Android DownloadManager: that produces a separate system notification.
+   MediaDownloadService.enqueueDirect(getApplicationContext(),link,filename,mime,agent,cookie,referer);
+   Toast.makeText(this,"Download added to MH Browser",Toast.LENGTH_SHORT).show();
+   if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+    requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},302);
+  }catch(Exception e){dialog("Download failed","Could not start MH Browser download: "+e.getMessage());}
  }
  void general(){
   showingSettings=true;screen=2;head.removeAllViews();body.removeAllViews();sectionHeader("General",this::settings);
@@ -1188,7 +1192,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   settingRow(list,"▤  Multi-window / Split screen","Use Android system split screen",this::multiWindow);
   switchRow(list,"⊘  Do Not Track","Send DNT: 1 on direct page navigation","dnt",false);
   settingRow(list,"⚙  Advanced","Zoom, network and history controls",this::advanced);
-  settingRow(list,"ⓘ  About MH Browser","Version 1.0 • MH Developers",()->dialog("About MH Browser","MH Browser\nVersion 1.0\n\nDevelopers\nMH Developers (Masum DEV)"));
+  settingRow(list,"ⓘ  About MH Browser","Version 1.0 • MasoomDev",()->dialog("About MH Browser","MH Browser\nVersion 1.0\n\nCompany: MasoomDev\nDeveloped By: MH Developers"));
  }
  void privacy(){
   showingSettings=true;screen=3;head.removeAllViews();body.removeAllViews();
