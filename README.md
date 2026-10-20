@@ -17,6 +17,16 @@ Android browser using Android System WebView (Chromium-based). Branded navy/cyan
 - Optional background media continuation where websites and Android allow it.
 - Permission-gated website geolocation.
 
+## October 2026 UI and browsing updates
+- Video-only Picture-in-Picture is available for fullscreen WebChromeClient video views, not for the entire browser. The user must first enter video fullscreen.
+- The browser can avoid pausing its WebView when background playback is enabled. Sites such as YouTube may still pause playback under their own restrictions; this is not a guarantee of continuous YouTube background audio.
+- History now stores page titles, hostnames, visit timestamps and groups by Today, Yesterday, Previous 7 Days, This Month, This Year, and Older. Selected or full deletion also clears the open WebViews' Back/Forward stacks.
+- Bookmarks now have a management page with add, open and delete actions.
+- The main menu uses branded grouped cards, centered logo and icons. Settings cards are organized and styled.
+- Home advertising artwork and **For Advertising, Contact with Us** are placeholders until the owner provides a contact number.
+- Home Google account icon opens an external system browser for secure Google authentication; this **does not** synchronize Google credentials or sessions into MH Browser. Official account integration needs Google-approved OAuth configuration and credentials.
+- Desktop site toggle is now per-tab and requests a desktop user agent with wide viewport.
+
 ## Not complete / important limitations
 - **Incognito is not securely isolated from normal WebView cookies in this preview.** Do not use it for sensitive private sessions.
 - Tab URL restoration does not preserve every in-page form, scroll position, playback state, or complete navigation stack.
