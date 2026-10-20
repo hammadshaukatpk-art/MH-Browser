@@ -136,7 +136,7 @@ public class BrowserActivity extends Activity {
    mediaOverlay=makeMediaOverlay();
    FrameLayout.LayoutParams mp=new FrameLayout.LayoutParams(dp(59),dp(59),Gravity.END|Gravity.BOTTOM);
    mp.setMargins(dp(12),dp(12),dp(17),dp(85));layer.addView(mediaOverlay,mp);
-   mediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
+   mediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
    address.setText(w.getUrl());
   }
   controls();
@@ -371,7 +371,7 @@ public class BrowserActivity extends Activity {
  }
  void updateMediaOverlay(){
   if(mediaOverlay!=null)mediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
-  if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(mediaPlaying&&mediaAvailable?View.VISIBLE:View.GONE);
+  if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
  }
  void showVideo(View v,WebChromeClient.CustomViewCallback cb){
   if(fullscreenVideo!=null){cb.onCustomViewHidden();return;}
@@ -706,32 +706,125 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void mediaDownloads(){
   if(tabs.isEmpty())return;
-  active().evaluateJavascript(mediaSourceScript(),raw->{
-   JSONArray sources=parseMediaSources(raw);
-   if(sources.length()==0){
-    mediaAvailable=false;updateMediaOverlay();
-    dialog("Media downloads","No downloadable direct media source is available on this page. Streaming services may use segmented, protected, or inaccessible sources. MH Browser cannot offer resolutions or MP3 conversion unless a usable source is available.");
-    return;
+  WebView web=active();
+  String currentUrl=web.getUrl();
+  if(currentUrl==null||!currentUrl.startsWith("http"))return;
+  // For single-page players, use the actual video permalink where available.
+  String js="(function(){try{var d=window.ytInitialPlayerResponse&&window.ytInitialPlayerResponse.videoDetails;"+
+   "if(d&&d.videoId)return 'https://www.youtube.com/watch?v='+d.videoId;"+
+   "var meta=document.querySelector('meta[itemprop=videoId]');"+
+   "if(meta&&meta.content)return 'https://www.youtube.com/watch?v='+meta.content;"+
+   "var c=document.querySelector('link[rel=canonical]');"+
+   "if(c&&c.href&&c.href.indexOf('/watch?')>=0)return c.href;"+
+   "return location.href;}catch(e){return location.href}})()";
+  web.evaluateJavascript(js,result->{
+   String mediaPage=currentUrl;
+   try{
+    String decoded=new JSONArray("["+result+"]").optString(0,currentUrl);
+    if(decoded.startsWith("https://")||decoded.startsWith("http://"))mediaPage=decoded;
+   }catch(Exception ignored){}
+   final String url=mediaPage;
+   String host=Uri.parse(url).getHost();
+   boolean knownSite=host!=null&&(host.endsWith("youtube.com")||host.equals("youtu.be")||host.endsWith("vimeo.com")||host.endsWith("dailymotion.com")||host.endsWith("soundcloud.com"));
+   web.evaluateJavascript(mediaSourceScript(),raw->{
+    JSONArray sources=parseMediaSources(raw);
+    if(knownSite||sources.length()==0){
+     inspectMediaFormats(url,sources);
+    }else{
+     themed().setTitle("Media download options")
+      .setItems(new String[]{"Video/audio quality options","Direct downloadable files ("+sources.length()+")"},
+       (d,which)->{if(which==0)inspectMediaFormats(url,sources);else directMediaSources(sources);})
+      .setNegativeButton("Cancel",null).show();
+    }
+   });
+  });
+ }
+ void directMediaSources(JSONArray sources){
+  ArrayList<String> labels=new ArrayList<>();
+  for(int i=0;i<sources.length();i++){
+   JSONObject item=sources.optJSONObject(i);if(item==null)continue;
+   labels.add(item.optString("kind")+(item.optString("label").isEmpty()?" • Original source":" • "+item.optString("label")));
+  }
+  if(labels.isEmpty()){dialog("Media downloads","No downloadable direct media files are available.");return;}
+  themed().setTitle("Direct media files")
+   .setItems(labels.toArray(new String[0]),(d,which)->{
+    JSONObject item=sources.optJSONObject(which);if(item==null)return;
+    String link=item.optString("url"),mime=item.optString("type");
+    String filename=URLUtil.guessFileName(link,null,mime);
+    themed().setTitle("Save original file?").setMessage(filename)
+     .setNegativeButton("Cancel",null)
+     .setPositiveButton("Download",(x,y)->startDownload(link,filename,mime)).show();
+   }).setNegativeButton("Cancel",null).show();
+ }
+ void inspectMediaFormats(String mediaUrl,JSONArray directSources){
+  LinearLayout loading=column();loading.setPadding(dp(22),dp(16),dp(22),dp(16));
+  ProgressBar spinner=new ProgressBar(this);loading.addView(spinner);
+  TextView info=text("Checking available video resolutions and audio formats…",14,GRAY);
+  info.setPadding(0,dp(14),0,0);loading.addView(info);
+  AlertDialog wait=themed().setTitle("Checking media formats").setView(loading)
+   .setNegativeButton("Cancel",null).create();
+  wait.show();styleDialog(wait);
+  MediaDownloadEngine.inspect(getApplicationContext(),mediaUrl,new MediaDownloadEngine.Callback(){
+   @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){
+    runOnUiThread(()->{
+     if(isFinishing()||isDestroyed())return;
+     wait.dismiss();
+     String[] names=new String[choices.size()];
+     for(int i=0;i<choices.size();i++)names[i]=choices.get(i).label;
+     themed().setTitle("Download • "+title)
+      .setItems(names,(d,n)->{
+       MediaDownloadEngine.Choice choice=choices.get(n);
+       themed().setTitle("Start download?")
+        .setMessage(choice.label+"\n\nDownload only media you own or have permission to save. Some websites may reject extraction.")
+        .setNegativeButton("Cancel",null)
+        .setPositiveButton("Download",(x,y)->downloadMediaFile(mediaUrl,choice)).show();
+      }).setNegativeButton("Cancel",null).show();
+    });
    }
-   ArrayList<String> labels=new ArrayList<>();
-   for(int i=0;i<sources.length();i++){
-    JSONObject item=sources.optJSONObject(i);
-    String label=item.optString("label");
-    labels.add(item.optString("kind")+(label.isEmpty()?" • Source file":" • "+label));
+   @Override public void failed(String error){
+    runOnUiThread(()->{
+     if(isFinishing()||isDestroyed())return;
+     wait.dismiss();
+     if(directSources.length()>0){
+      themed().setTitle("Media format lookup failed").setMessage(error)
+       .setNegativeButton("Close",null)
+       .setPositiveButton("Show direct files",(d,n)->directMediaSources(directSources)).show();
+     }else dialog("Media formats unavailable",error);
+    });
    }
-   themed().setTitle("Download available media")
-    .setItems(labels.toArray(new String[0]),(d,which)->{
-     JSONObject item=sources.optJSONObject(which);
-     if(item==null)return;
-     String link=item.optString("url"),mime=item.optString("type");
-     if(mime.isEmpty())mime="application/octet-stream";
-     final String finalMime=mime;
-     String filename=URLUtil.guessFileName(link,null,finalMime);
-     themed().setTitle("Save media file")
-      .setMessage(labels.get(which)+"\n"+filename+"\n\nOnly the original available file will be downloaded. No audio conversion is performed.")
-      .setNegativeButton("Cancel",null)
-      .setPositiveButton("Download",(x,y)->startDownload(link,filename,finalMime)).show();
-    }).setNegativeButton("Cancel",null).show();
+   @Override public void progress(int percent,String line){}
+   @Override public void completed(String name,String uri,String mime){}
+  });
+ }
+ void downloadMediaFile(String mediaUrl,MediaDownloadEngine.Choice choice){
+  LinearLayout panel=column();panel.setPadding(dp(22),dp(12),dp(22),dp(12));
+  ProgressBar progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+  progress.setMax(100);panel.addView(progress,new LinearLayout.LayoutParams(-1,dp(6)));
+  TextView status=text("Preparing download…",13,GRAY);status.setPadding(0,dp(12),0,0);panel.addView(status);
+  AlertDialog window=themed().setTitle("Downloading media").setView(panel)
+   .setPositiveButton("Hide",(d,n)->Toast.makeText(this,"Download continues while MH Browser is running",Toast.LENGTH_LONG).show()).create();
+  window.setCancelable(false);window.show();styleDialog(window);
+  MediaDownloadEngine.download(getApplicationContext(),mediaUrl,choice,new MediaDownloadEngine.Callback(){
+   @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
+   @Override public void progress(int percent,String message){
+    runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){progress.setProgress(percent);status.setText("Downloading • "+percent+"%");}});
+   }
+   @Override public void completed(String name,String uri,String mime){
+    runOnUiThread(()->{
+     if(isFinishing()||isDestroyed())return;
+     window.dismiss();
+     try{
+      JSONArray records=readArray("downloads");JSONObject record=new JSONObject();
+      record.put("id",-1);record.put("uri",uri);record.put("name",name);record.put("mime",mime);
+      record.put("time",System.currentTimeMillis());records.put(record);storeArray("downloads",records);
+     }catch(Exception ignored){}
+     themed().setTitle("Download complete").setMessage(name+"\nSaved in Downloads / MH Browser")
+      .setNegativeButton("Close",null).setPositiveButton("View downloads",(d,n)->downloads()).show();
+    });
+   }
+   @Override public void failed(String error){
+    runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){window.dismiss();dialog("Download failed",error);}});
+   }
   });
  }
  void lookupPublicIp(){
@@ -779,13 +872,14 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    LinearLayout info=column();card.addView(info,new LinearLayout.LayoutParams(0,-2,1));
    TextView title=text("↓  "+name,15,WHITE);title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);info.addView(title);
    String date=new java.text.SimpleDateFormat("MMM d, yyyy • h:mm a",Locale.getDefault()).format(new Date(t));
-   int status=0;try( android.database.Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
+   int status=id==-1?DownloadManager.STATUS_SUCCESSFUL:0;
+   if(id!=-1)try(android.database.Cursor cursor=dm.query(new DownloadManager.Query().setFilterById(id))){
     if(cursor!=null&&cursor.moveToFirst())status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
    }catch(Exception ignored){}
    String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":status==DownloadManager.STATUS_FAILED?"Failed":status==DownloadManager.STATUS_RUNNING?"Downloading":"Pending";
    info.addView(text(date+" • "+state,12,GRAY));
    if(status==DownloadManager.STATUS_SUCCESSFUL)card.setOnClickListener(v->{
-    try{Uri uri=dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
+    try{Uri uri=id==-1?Uri.parse(item.optString("uri")):dm.getUriForDownloadedFile(id);Intent open=new Intent(Intent.ACTION_VIEW);open.setDataAndType(uri,item.optString("mime","*/*"));open.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(open);}
     catch(Exception e){dialog("Open download","No compatible app is available to open this file.");}
    });
   }
