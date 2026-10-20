@@ -37,6 +37,10 @@ public class BrowserActivity extends Activity {
  final Map<String,JSONArray> directMediaCache=new HashMap<>();
  final Map<WebView,TextView> tabTitleViews=new HashMap<>();
  final Map<WebView,Integer> mediaInjectionStages=new java.util.WeakHashMap<>();
+ final Map<WebView,String> pageForFiltering=java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+ AlertDialog activeMediaDialog;
+ LinearLayout activeDirectMediaOptions;
+ String activeMediaPage;
  final Map<WebView,Set<String>> networkMediaSeen=new java.util.WeakHashMap<>();
  final Map<WebView,String> lastWorkingPage=new java.util.WeakHashMap<>();
  final Map<WebView,Long> videoConnectionRecovery=new java.util.WeakHashMap<>();
@@ -288,6 +292,13 @@ public class BrowserActivity extends Activity {
   @JavascriptInterface public void found(){runOnUiThread(()->signalMediaFound(w));}
   @JavascriptInterface public void pageChanged(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;mediaAvailable=isMediaPage(w.getUrl());updateMediaOverlay();if(mediaAvailable)prefetchMediaFormats(w.getUrl());}});}
   @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
+  @JavascriptInterface public void candidate(String link){
+   if(link==null||link.length()>4096)return;
+   runOnUiThread(()->{
+    try{Uri u=Uri.parse(link);if(isNetworkMediaUrl(u))noteNetworkMedia(w,u);}
+    catch(Exception ignored){}
+   });
+  }
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
@@ -299,6 +310,7 @@ public class BrowserActivity extends Activity {
    mediaInjectionStages.put(view,stage);
    if(view.getUrl()!=null&&view.getUrl().startsWith("http")){
     view.evaluateJavascript(mediaObserverScript(),null);
+    view.evaluateJavascript(mediaProbeScript(),null);
     applyAdCosmetics(view);
    }
   }
@@ -389,6 +401,7 @@ public class BrowserActivity extends Activity {
     recoverFailedVideoHost(v,request.getUrl().toString(),detail);
   }
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){
+   if(u!=null)pageForFiltering.put(v,u);
    mediaInjectionStages.remove(v);
    networkMediaSeen.remove(v);
    if(v==active()){
@@ -412,8 +425,8 @@ public class BrowserActivity extends Activity {
     if(recovery==null||SystemClock.elapsedRealtime()-recovery>5000)lastWorkingPage.put(v,u);
    }
    refreshTabTitle(v);
- v.evaluateJavascript(mediaObserverScript(),null);applyAdCosmetics(v);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
-   if(AdBlockRules.shouldBlock(req,prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
+ v.evaluateJavascript(mediaObserverScript(),null);v.evaluateJavascript(mediaProbeScript(),null);applyAdCosmetics(v);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){
+   if(AdBlockRules.shouldBlock(req,pageForFiltering.get(v),prefs.getBoolean("adBlocker",true),prefs.getBoolean("trackers",true)))
     return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
    if(!req.isForMainFrame()&&isNetworkMediaUrl(req.getUrl()))
     v.post(()->noteNetworkMedia(v,req.getUrl()));
@@ -1076,8 +1089,31 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  boolean isNetworkMediaUrl(Uri u){
   if(u==null)return false;
+  String scheme=u.getScheme();if(!"https".equalsIgnoreCase(scheme)&&!"http".equalsIgnoreCase(scheme))return false;
   String path=u.getPath();if(path==null)return false;
-  return path.toLowerCase(Locale.ROOT).matches(".*\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8|mpd)$");
+  path=path.toLowerCase(Locale.ROOT);
+  if(path.matches(".*\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8)$"))return true;
+  // Common signed player URLs omit file extensions.
+  String query=u.getEncodedQuery();if(query==null)query="";
+  query=query.toLowerCase(Locale.ROOT);
+  return (path.endsWith("/master")||path.endsWith("/playlist")||path.endsWith("/index")||
+    path.endsWith("/hls")||path.endsWith("/manifest"))
+    &&(query.contains("m3u8")||query.contains("hls")||query.contains("format=mp4"));
+ }
+ String mediaProbeScript(){
+  return "(function(){if(!window.MHMedia||!window.MHMedia.candidate)return;"+
+   "var seen=window.mhCandidateSeen||(window.mhCandidateSeen={});"+
+   "function send(u){try{if(!u||typeof u!=='string'||u.length>4096||seen[u]||!/^https?:\\/\\//i.test(u))return;"+
+   "var x=new URL(u,location.href),p=x.pathname.toLowerCase();"+
+   "if(!/\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8)$/.test(p))return;"+
+   "seen[u]=1;MHMedia.candidate(x.href);}catch(e){}}"+
+   "document.querySelectorAll('video,audio,video source,audio source').forEach(function(e){send(e.currentSrc||e.src);});"+
+   "try{performance.getEntriesByType('resource').slice(-200).forEach(function(e){send(e.name);});}catch(e){}"+
+   "if(!window.mhProbeTimer){window.mhProbeTimer=setInterval(function(){"+
+   "document.querySelectorAll('video,audio,video source,audio source').forEach(function(e){send(e.currentSrc||e.src);});"+
+   "try{performance.getEntriesByType('resource').slice(-100).forEach(function(e){send(e.name);});}catch(e){}"+
+   "},1800);}"+
+   "})()";
  }
  void mergeDirectMedia(String page,JSONArray discovered){
   if(page==null||discovered==null)return;
@@ -1114,6 +1150,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   JSONObject o=new JSONObject();
   try{o.put("url",link);o.put("kind",kind);o.put("type",kind.equals("Audio")?"audio/*":kind.equals("HLS")?"application/vnd.apple.mpegurl":"video/*");o.put("label",kind.equals("HLS")?"Streaming playlist":"Detected stream");direct.put(o);}
   catch(Exception ignored){}
+  if(activeMediaDialog!=null&&activeMediaDialog.isShowing()&&page.equals(activeMediaPage)&&activeDirectMediaOptions!=null)
+   showDirectChoices(activeDirectMediaOptions,direct,activeMediaDialog);
  }
  String embeddedMediaScript(){
   return "(function(){var out=[],seen={};"+
@@ -1209,9 +1247,16 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   quickChoices.add(new MediaDownloadEngine.Choice("Audio • M4A",0,"m4a"));
   AlertDialog dialog=themed().setView(scroll).setNegativeButton("Close",null).create();
   dialog.show();styleDialog(dialog);
+  activeMediaDialog=dialog;activeDirectMediaOptions=directOptions;activeMediaPage=web.getUrl();
+  dialog.setOnDismissListener(d->{
+   if(activeMediaDialog==dialog){activeMediaDialog=null;activeDirectMediaOptions=null;activeMediaPage=null;}
+  });
   if(dialog.getWindow()!=null){android.util.DisplayMetrics m=getResources().getDisplayMetrics();
    dialog.getWindow().setLayout((int)(m.widthPixels*0.92f),Math.min(dp(680),(int)(m.heightPixels*0.82f)));}
-  addFormatChoices(quickOptions,initialUrl,mediaFormatCache.containsKey(initialUrl)?mediaFormatCache.get(initialUrl):quickChoices,dialog);
+  boolean knownMediaPage=isMediaPage(initialUrl)||isNetworkMediaUrl(Uri.parse(initialUrl));
+  if(knownMediaPage||mediaFormatCache.containsKey(initialUrl))
+   addFormatChoices(quickOptions,initialUrl,mediaFormatCache.containsKey(initialUrl)?mediaFormatCache.get(initialUrl):quickChoices,dialog);
+  else state.setText("Play the video first. Detecting embedded players and direct media streams; page-only links may not be downloadable.");
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
   web.evaluateJavascript(embeddedMediaScript(),raw->{
@@ -1240,7 +1285,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
    @Override public void failed(String error){
     if(!dialog.isShowing())return;
-    state.setText("Quick quality choices remain available. Exact lookup: "+error);
+    state.setText("No supported stream found for this page URL. Play the video, then use a detected stream or embedded player. Details: "+error);
     settingRow(options,"↻  Retry format detection","Check available video/audio formats again",()->{
      mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
      dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
