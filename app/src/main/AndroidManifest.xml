@@ -7,5 +7,9 @@
         <activity android:name=".BrowserActivity" android:resizeableActivity="true" android:supportsPictureInPicture="true" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
+        <activity android:name=".PrivateBrowserActivity" android:process=":private"
+            android:exported="false" android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
     </application>
 </manifest>
