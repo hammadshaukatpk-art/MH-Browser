@@ -192,6 +192,46 @@ public class BrowserActivity extends Activity {
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
+ // Translate Facebook-only deep links into public web URLs when possible.
+ // Never open the Facebook app: public videos should remain in this WebView.
+ String facebookWebUrl(Uri link){
+  if(link==null)return null;
+  String host=link.getHost();if(host==null)host="";
+  host=host.toLowerCase(java.util.Locale.ROOT);
+  String id=link.getQueryParameter("v");
+  if(id==null||id.isEmpty())id=link.getQueryParameter("video_id");
+  if(id==null||id.isEmpty())id=link.getQueryParameter("id");
+  java.util.List<String> segments=link.getPathSegments();
+  if((id==null||id.isEmpty())&&!segments.isEmpty()&&(host.equals("video")||host.equals("watch")))
+   id=segments.get(0);
+  if((host.equals("video")||host.equals("watch"))&&id!=null&&!id.isEmpty())
+   return "https://www.facebook.com/watch/?v="+Uri.encode(id);
+  if(host.equals("facewebmodal")){
+   String href=link.getQueryParameter("href");
+   if(href!=null&&(href.startsWith("https://")||href.startsWith("http://"))){
+    try{
+     String h=Uri.parse(href).getHost();
+     if(h!=null&&(h.equalsIgnoreCase("facebook.com")||h.toLowerCase(java.util.Locale.ROOT).endsWith(".facebook.com")))
+      return href;
+    }catch(Exception ignored){}
+   }
+  }
+  if(host.equals("native_post")){
+   String story=link.getQueryParameter("story_fbid");
+   String owner=link.getQueryParameter("id");
+   if(story!=null&&!story.isEmpty()&&owner!=null&&!owner.isEmpty())
+    return "https://www.facebook.com/permalink.php?story_fbid="+Uri.encode(story)+"&id="+Uri.encode(owner);
+  }
+  return null;
+ }
+ boolean onFacebookWebsite(WebView view){
+  String current=view.getUrl();
+  if(current==null)return false;
+  try{
+   String host=Uri.parse(current).getHost();
+   return host!=null&&(host.equalsIgnoreCase("facebook.com")||host.toLowerCase(java.util.Locale.ROOT).endsWith(".facebook.com"));
+  }catch(Exception ignored){return false;}
+ }
  void createTab(boolean inc){if(inc&&!privateOnly){if(Build.VERSION.SDK_INT<28){dialog("Private browsing","Isolated private browsing requires Android 9 or newer on this build.");return;}startActivity(new Intent(this,PrivateBrowserActivity.class));
  // Keep the normal browser visible underneath the isolated private activity.
  overridePendingTransition(0,0);return;}if(privateOnly)inc=true;WebView w=new WebView(this);w.setBackgroundColor(WHITE);WebSettings s=w.getSettings();s.setJavaScriptEnabled(prefs.getBoolean("javascript",true));s.setLoadsImagesAutomatically(prefs.getBoolean("images",true));s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(true);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setSafeBrowsingEnabled(true);s.setSupportZoom(prefs.getBoolean("zoom",true));s.setBuiltInZoomControls(prefs.getBoolean("zoom",true));s.setDisplayZoomControls(false);s.setJavaScriptCanOpenWindowsAutomatically(prefs.getBoolean("popups",false));s.setSupportMultipleWindows(false);if(prefs.getBoolean("desktop",false)){s.setUserAgentString(desktopAgent());s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);}if(inc)s.setCacheMode(WebSettings.LOAD_NO_CACHE);
@@ -233,23 +273,37 @@ public class BrowserActivity extends Activity {
    if(scheme==null)return false;
    if(scheme.equalsIgnoreCase("http")||scheme.equalsIgnoreCase("https")||scheme.equalsIgnoreCase("about"))return false;
    if(scheme.equalsIgnoreCase("fb")){
-    // Facebook search results sometimes point to fb://native_post/... .
-    try{
-     Intent app=new Intent(Intent.ACTION_VIEW,target);
-     app.addCategory(Intent.CATEGORY_BROWSABLE);
-     startActivity(app);return true;
-    }catch(Exception ignored){}
-    view.loadUrl("https://www.facebook.com/");
-    Toast.makeText(BrowserActivity.this,"Facebook app link opened in Facebook website",Toast.LENGTH_SHORT).show();
+    // Facebook uses fb:// to offer its app. Never hand this to Android.
+    // If the public Facebook page is already loading, just suppress the app prompt.
+    if(onFacebookWebsite(view))return true;
+    String web=facebookWebUrl(target);
+    if(web!=null)view.loadUrl(web);
+    else Toast.makeText(BrowserActivity.this,"This Facebook link has no public web address",Toast.LENGTH_SHORT).show();
     return true;
    }
    if(scheme.equalsIgnoreCase("intent")){
     try{
      Intent app=Intent.parseUri(target.toString(),Intent.URI_INTENT_SCHEME);
+     String pkg=app.getPackage();
+     String fallback=app.getStringExtra("browser_fallback_url");
+     Uri data=app.getData();
+     boolean facebookIntent=(pkg!=null&&pkg.toLowerCase(java.util.Locale.ROOT).startsWith("com.facebook."))
+       ||(data!=null&&"fb".equalsIgnoreCase(data.getScheme()));
+     if(facebookIntent){
+      // Ignore Facebook's automatic app-launch intent while its page is open.
+      if(onFacebookWebsite(view))return true;
+      String web=data==null?null:facebookWebUrl(data);
+      if(web==null&&fallback!=null&&(fallback.startsWith("https://")||fallback.startsWith("http://"))){
+       Uri fbFallback=Uri.parse(fallback);String h=fbFallback.getHost();
+       if(h!=null&&(h.equalsIgnoreCase("facebook.com")||h.toLowerCase(java.util.Locale.ROOT).endsWith(".facebook.com")))web=fallback;
+      }
+      if(web!=null)view.loadUrl(web);
+      return true;
+     }
+     // Non-Facebook intents keep the existing supported external-app behavior.
      app.addCategory(Intent.CATEGORY_BROWSABLE);
      app.setComponent(null);app.setSelector(null);
-     try{startActivity(app);return true;}catch(android.content.ActivityNotFoundException noHandler){/* use safe web fallback */}
-     String fallback=app.getStringExtra("browser_fallback_url");
+     try{startActivity(app);return true;}catch(android.content.ActivityNotFoundException noHandler){}
      if(fallback!=null&&(fallback.startsWith("https://")||fallback.startsWith("http://"))){view.loadUrl(fallback);return true;}
     }catch(Exception ignored){}
     Toast.makeText(BrowserActivity.this,"This link needs another app",Toast.LENGTH_SHORT).show();
