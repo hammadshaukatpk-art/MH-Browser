@@ -41,8 +41,8 @@ public class MediaDownloadService extends Service {
   int id=notificationId(task);
   active.incrementAndGet();
   // Android requires foreground service promotion promptly after startForegroundService.
-  startForeground(id,notification("MH Browser • Downloading",choice.label,0,true,false));
-  save(task,choice.label,"Downloading",0,"Preparing extractor…",null,null);
+  startForeground(id,notification("MH Browser • Preparing download",choice.label,0,true,false));
+  save(task,choice.label,"Preparing",0,"Connecting to media source…",null,null);
   MediaDownloadEngine.download(getApplicationContext(),url,choice,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
    @Override public void progress(int percent,String line){
@@ -51,9 +51,10 @@ public class MediaDownloadService extends Service {
     if(last!=null&&now-last<650&&percent<100)return;
     lastWriteByTask.put(task,now);
     String speed=extractSpeed(line);
-    String info=percent+"%"+(speed.isEmpty()?"":" • "+speed);
-    save(task,choice.label,"Downloading",percent,speed,null,null);
-    manager.notify(id,notification("MH Browser • Downloading",info,percent,true,false));
+    boolean transferring=percent>0;
+    String info=transferring?percent+"%"+(speed.isEmpty()?"":" • "+speed):shortText(line);
+    save(task,choice.label,transferring?"Downloading":"Preparing",percent,transferring?speed:shortText(line),null,null);
+    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",info,percent,true,false));
    }
    @Override public void completed(String name,String uri,String mime){
     save(task,name,"Completed",100,"Download complete",uri,mime);
