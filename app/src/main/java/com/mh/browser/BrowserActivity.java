@@ -28,7 +28,8 @@ import androidx.webkit.WebViewFeature;
 public class BrowserActivity extends Activity {
  final int BG=0xff071326,PANEL=0xff10223a,BLUE=0xff269cff,WHITE=Color.WHITE,GRAY=0xffa4b6ce;
  LinearLayout root,head,body,bar; EditText address; boolean showingSettings=false;int screen=0;
- View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer;
+ View fullscreenVideo;WebChromeClient.CustomViewCallback fullscreenCallback;FrameLayout videoLayer,webPageLayer;
+ TextView mediaOverlay,fullscreenMediaOverlay;
  boolean mediaPlaying=false, privateOnly=false; int historyFilter=0,downloadFilter=0;
  final LruCache<String,Bitmap> shortcutIconCache=new LruCache<>(24);
  ArrayList<Tab> tabs=new ArrayList<>();int index=-1; boolean privateNext=false;
@@ -85,8 +86,6 @@ public class BrowserActivity extends Activity {
   address.setImeOptions(2);
   address.setOnEditorActionListener((v,a,e)->{navigate(address.getText().toString());address.clearFocus();
     ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(address.getWindowToken(),0);return true;});
-  TextView media=action("↓",24,this::mediaDownloads);media.setContentDescription("Download available media");
-  r.addView(media,new LinearLayout.LayoutParams(dp(38),dp(48)));
   TextView reload=action("⟳",25,()->active().reload());r.addView(reload,new LinearLayout.LayoutParams(dp(40),dp(48)));
  }
 
@@ -98,8 +97,8 @@ public class BrowserActivity extends Activity {
    .setNegativeButton("Cancel",null).setPositiveButton("Download",(d,n)->startDownload(link,filename,mime)).show();
  });
  w.addJavascriptInterface(new Object(){
-  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active())mediaPlaying=true;});}
-  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active())mediaPlaying=false;});}
+  @JavascriptInterface public void playing(){runOnUiThread(()->{if(w==active()){mediaPlaying=true;updateMediaOverlay();}});}
+  @JavascriptInterface public void stopped(){runOnUiThread(()->{if(w==active()){mediaPlaying=false;updateMediaOverlay();}});}
  },"MHMedia");
  w.setWebChromeClient(new WebChromeClient(){
   @Override public void onShowCustomView(View view,CustomViewCallback callback){showVideo(view,callback);}
@@ -124,7 +123,24 @@ public class BrowserActivity extends Activity {
   @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap icon){if(v==active()&&!showingSettings)display();}@Override public void onPageFinished(WebView v,String u){if(v==active()&&!showingSettings){if(address!=null)address.setText(u.equals("about:blank")?"":u);display();}
  v.evaluateJavascript("(function(){if(window.mhMediaInit)return;window.mhMediaInit=true;function watch(){document.querySelectorAll('video,audio').forEach(function(v){if(v.dataset.mhTracked)return;v.dataset.mhTracked='1';v.addEventListener('play',function(){MHMedia.playing()});v.addEventListener('pause',function(){MHMedia.stopped()})})}watch();new MutationObserver(watch).observe(document.documentElement,{childList:true,subtree:true});})()",null);for(Tab t:tabs)if(t.web==v&&!t.incognito&&u.startsWith("http")){addHistory(u,v.getTitle());break;}}@Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){if(!prefs.getBoolean("trackers",true))return null;String host=req.getUrl().getHost();if(host!=null&&(host.endsWith("doubleclick.net")||host.endsWith("google-analytics.com")||host.endsWith("facebook.net")))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}});
  tabs.add(new Tab(w,inc,prefs.getBoolean("desktop",false)));index=tabs.size()-1;display();}
- void display(){showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}else{header();WebView w=active();if(w.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)w.getParent()).removeView(w);body.addView(w,new LinearLayout.LayoutParams(-1,-1));address.setText(w.getUrl());}controls();}
+ void display(){
+  showingSettings=false;screen=0;head.removeAllViews();tabStrip();body.removeAllViews();
+  webPageLayer=null;mediaOverlay=null;
+  if(active().getUrl()==null||active().getUrl().equals("about:blank")){address=null;home();}
+  else{
+   header();WebView w=active();
+   if(w.getParent() instanceof ViewGroup)((ViewGroup)w.getParent()).removeView(w);
+   FrameLayout layer=new FrameLayout(this);webPageLayer=layer;
+   body.addView(layer,new LinearLayout.LayoutParams(-1,-1));
+   layer.addView(w,new FrameLayout.LayoutParams(-1,-1));
+   mediaOverlay=makeMediaOverlay();
+   FrameLayout.LayoutParams mp=new FrameLayout.LayoutParams(dp(59),dp(59),Gravity.END|Gravity.BOTTOM);
+   mp.setMargins(dp(12),dp(12),dp(17),dp(85));layer.addView(mediaOverlay,mp);
+   mediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
+   address.setText(w.getUrl());
+  }
+  controls();
+ }
  void tabStrip(){
   HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
   sc.setFillViewport(false);sc.setBackgroundColor(0xff0a1b31);head.addView(sc,new LinearLayout.LayoutParams(-1,dp(51)));
@@ -162,7 +178,7 @@ public class BrowserActivity extends Activity {
   TextView account=text("Google",10,WHITE);account.setGravity(Gravity.CENTER);profile.addView(account);
   String googleCookies=CookieManager.getInstance().getCookie("https://accounts.google.com/");
   boolean sessionHint=!privateOnly&&googleCookies!=null&&(googleCookies.contains("SID=")||googleCookies.contains("HSID="));
-  TextView login=text(sessionHint?"Session saved":"Login Gmail",9,GRAY);login.setGravity(Gravity.CENTER);profile.addView(login);
+  TextView login=text("Login Gmail",9,GRAY);login.setGravity(Gravity.CENTER);profile.addView(login);
   profile.setOnClickListener(v->googleAccount());
 
   if(tabs.get(index).incognito){
@@ -344,12 +360,29 @@ public class BrowserActivity extends Activity {
   if(t.web.getUrl()!=null&&t.web.getUrl().startsWith("http"))t.web.reload();
   Toast.makeText(this,t.desktop?"Desktop site requested":"Mobile site requested",Toast.LENGTH_SHORT).show();
  }
+ TextView makeMediaOverlay(){
+  TextView button=action("↓",27,this::mediaDownloads);
+  button.setContentDescription("Download available audio or video");
+  button.setTypeface(null,Typeface.BOLD);
+  button.setBackground(grad(0xff238dc4,0xff12567e,19));
+  button.setElevation(dp(9));
+  return button;
+ }
+ void updateMediaOverlay(){
+  if(mediaOverlay!=null)mediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
+  if(fullscreenMediaOverlay!=null)fullscreenMediaOverlay.setVisibility(mediaPlaying?View.VISIBLE:View.GONE);
+ }
  void showVideo(View v,WebChromeClient.CustomViewCallback cb){
   if(fullscreenVideo!=null){cb.onCustomViewHidden();return;}
   fullscreenVideo=v;fullscreenCallback=cb;
   videoLayer=new FrameLayout(this);videoLayer.setBackgroundColor(Color.BLACK);
   if(v.getParent() instanceof ViewGroup)((ViewGroup)v.getParent()).removeView(v);
   videoLayer.addView(v,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
+  fullscreenMediaOverlay=makeMediaOverlay();
+  FrameLayout.LayoutParams downloadPosition=new FrameLayout.LayoutParams(dp(59),dp(59),Gravity.END|Gravity.BOTTOM);
+  downloadPosition.setMargins(dp(12),dp(12),dp(17),dp(45));
+  videoLayer.addView(fullscreenMediaOverlay,downloadPosition);
+  updateMediaOverlay();
   ((ViewGroup)getWindow().getDecorView()).addView(videoLayer,new ViewGroup.LayoutParams(-1,-1));
   getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   getWindow().getDecorView().setSystemUiVisibility(5894|1024|512);
@@ -357,7 +390,7 @@ public class BrowserActivity extends Activity {
  void hideVideo(){
   if(fullscreenVideo==null)return;
   if(videoLayer!=null){videoLayer.removeAllViews();((ViewGroup)getWindow().getDecorView()).removeView(videoLayer);}
-  fullscreenVideo=null;videoLayer=null;
+  fullscreenVideo=null;videoLayer=null;fullscreenMediaOverlay=null;
   WebChromeClient.CustomViewCallback cb=fullscreenCallback;fullscreenCallback=null;
   if(cb!=null)cb.onCustomViewHidden();
   getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -426,6 +459,25 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   link.setSingleLine(true);link.setHint("https://example.com");link.setTextColor(WHITE);link.setInputType(17);
   if(old!=null){name.setText(old.optString("name"));link.setText(old.optString("url"));}
   c.addView(name);c.addView(link);
+  LinearLayout preview=row();preview.setPadding(dp(8),dp(8),dp(8),dp(8));
+  ImageView iconPreview=new ImageView(this);iconPreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+  iconPreview.setPadding(dp(5),dp(5),dp(5),dp(5));iconPreview.setBackground(grad(WHITE,0xffeaf3ff,13));
+  preview.addView(iconPreview,new LinearLayout.LayoutParams(dp(46),dp(46)));
+  TextView previewText=text("Website logo preview",13,GRAY);previewText.setPadding(dp(12),0,0,0);
+  preview.addView(previewText);c.addView(preview);
+  if(old!=null)loadShortcutIcon(iconPreview,old.optString("url",""));
+  link.addTextChangedListener(new android.text.TextWatcher(){
+   public void beforeTextChanged(CharSequence text,int start,int count,int after){}
+   public void onTextChanged(CharSequence text,int start,int before,int count){
+    String typed=text.toString().trim();
+    iconPreview.setImageDrawable(null);
+    if(typed.startsWith("https://")||typed.startsWith("http://")){
+     String host=Uri.parse(typed).getHost();
+     if(host!=null&&host.contains("."))loadShortcutIcon(iconPreview,typed);
+    }
+   }
+   public void afterTextChanged(android.text.Editable text){}
+  });
   AlertDialog d=themed().setTitle(position<0?"Add shortcut":"Edit shortcut").setView(c).setNegativeButton("Cancel",null)
    .setPositiveButton("Save",null).create();
   d.setOnShowListener(v->{styleDialog(d);d.getButton(-1).setOnClickListener(w->{
@@ -569,18 +621,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   navigate(url);
  }
  void googleAccount(){
-  String cookies=CookieManager.getInstance().getCookie("https://accounts.google.com/");
-  boolean hasCookies=cookies!=null&&(cookies.contains("SID=")||cookies.contains("HSID="));
-  String title=hasCookies?"Google • Saved browser session":"Google • Login Gmail";
-  String[] options={"Login Gmail","Open Gmail","Open YouTube","Google Account"};
-  themed().setTitle(title)
-   .setMessage(privateOnly?
-    "Google pages open inside the private MH Browser session. Private cookies are deleted when this session closes. Google may reject embedded browser sign-in.":
-    "Google pages open inside MH Browser. Website cookies and login sessions are saved locally until you sign out or clear browsing data. Google may reject sign-in inside Android WebView; an existing cookie does not confirm a valid login.")
-   .setItems(options,(d,i)->{
-    String[] links={"https://accounts.google.com/","https://mail.google.com/","https://www.youtube.com/","https://myaccount.google.com/"};
-    openGoogleInTab(links[i]);
-   }).setNegativeButton("Close",null).show();
+  // Go straight to Google's own sign-in page inside the active browser profile.
+  // Android WebView is an embedded browser: Google may independently refuse authentication.
+  openGoogleInTab("https://accounts.google.com/");
  }
  void bookmarks(){
   showingSettings=true;screen=7;head.removeAllViews();body.removeAllViews();sectionHeader("Bookmarks",this::display);
