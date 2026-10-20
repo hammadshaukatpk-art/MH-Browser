@@ -118,6 +118,26 @@ final class AdBlockRules {
    if(list.contains(host.substring(i+1)))return true;
   return false;
  }
+ /**
+  * A video-player tap must not hijack the original browser tab to an unrelated
+  * advertiser. Called only for a brief interval after an actual player gesture.
+  */
+ static boolean isCrossSiteAdRedirect(Uri destination,String original){
+  if(destination==null||original==null)return false;
+  String target=destination.getHost(),origin;
+  try{origin=Uri.parse(original).getHost();}catch(Exception e){return false;}
+  if(target==null||origin==null)return false;
+  target=target.toLowerCase(Locale.ROOT);
+  origin=origin.toLowerCase(Locale.ROOT);
+  if(target.equals(origin)||target.endsWith("."+origin)||origin.endsWith("."+target))return false;
+  if(matches(target,MEDIA_HOSTS)||matches(target,TRUSTED_SOCIAL))return false;
+  // Legitimate cross-site players may use a different CDN; block known ad
+  // destinations and suspicious redirects, not all external navigation.
+  if(matches(target,AD_HOSTS)||blockedDomain(target)||filterDomain(target))return true;
+  String path=destination.getPath();if(path==null)path="";
+  path=path.toLowerCase(Locale.ROOT);
+  return path.matches(".*(/popunder|/popads|/clickads|/advert|/adclick|/ad-redirect|/redirect-ad)(/.*)?");
+ }
  /** Stop known ad/tracker landing pages even when a click attempts top-level navigation. */
  static boolean shouldBlockNavigation(Uri uri,boolean ads){
   if(!ads||uri==null)return false;
@@ -147,11 +167,20 @@ final class AdBlockRules {
   path=path.toLowerCase(Locale.ROOT);
   String query=url.getEncodedQuery();
   if(query!=null&&query.length()<1000)path+="?"+query.toLowerCase(Locale.ROOT);
-  if(ads&&blockedPath(host,path))return true;
+  if(ads&&(blockedPath(host,path)||isExplicitAdEndpoint(path)))return true;
   if(firstParty)return false;
   if(matches(host,TRUSTED_SOCIAL))return false;
   return (ads&&(matches(host,AD_HOSTS)||blockedDomain(host)||filterDomain(host)))
     ||(trackers&&matches(host,TRACKERS));
+ }
+ private static boolean isExplicitAdEndpoint(String path){
+  // Narrow, ad-only endpoints on otherwise trusted hosts.
+  return path.startsWith("/pagead/")||path.startsWith("/ads/")||
+    path.startsWith("/adserver/")||path.startsWith("/adservice/")||
+    path.startsWith("/advertising/")||path.startsWith("/ad_delivery/")||
+    path.startsWith("/ad-delivery/")||path.startsWith("/preroll/")||
+    path.startsWith("/midroll/")||path.startsWith("/vast/")||
+    path.startsWith("/vmap/");
  }
  static String cosmeticScript(){
   return "(function(){"+
