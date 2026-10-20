@@ -1122,6 +1122,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   String path=u.getPath();if(path==null)return false;
   path=path.toLowerCase(Locale.ROOT);
   if(path.matches(".*\\.(mp4|m4v|webm|mov|mp3|m4a|aac|wav|ogg|opus|flac|m3u8)$"))return true;
+  String raw=u.toString().toLowerCase(Locale.ROOT);
+  if(raw.contains(".m3u8?")||raw.contains(".m3u8&")||raw.contains("format=m3u8")||raw.contains("type=m3u8"))return true;
   // Common signed player URLs omit file extensions.
   String query=u.getEncodedQuery();if(query==null)query="";
   query=query.toLowerCase(Locale.ROOT);
@@ -1172,7 +1174,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   mediaAvailable=true;updateMediaOverlay();
   String path=media.getPath()==null?"":media.getPath().toLowerCase(Locale.ROOT);
   if(path.endsWith(".mpd"))return; // DASH may be DRM protected: do not offer raw manifest downloads
-  String kind=path.endsWith(".m3u8")?"HLS":path.matches(".*\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
+  String kind=(path.endsWith(".m3u8")||link.toLowerCase(Locale.ROOT).contains("m3u8"))?"HLS":path.matches(".*\\.(mp3|m4a|aac|wav|ogg|opus|flac)$")?"Audio":"Video";
   JSONArray direct=directMediaCache.get(page);
   if(direct==null){direct=new JSONArray();directMediaCache.put(page,direct);}
   if(direct.length()>=12)return;
@@ -1353,7 +1355,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      MediaDownloadService.enqueue(getApplicationContext(),link,
       new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent);
      Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
-    }else startDownload(link,URLUtil.guessFileName(link,null,mime),mime);
+    }else startDownload(link,URLUtil.guessFileName(link,null,mime),mime,source.optString("referer",""));
    });
   }
  }
@@ -1561,7 +1563,8 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   if(downloadFilter==6){long d=prefs.getLong("downloadDate",today);return t>=d&&t<d+86400000L;}
   return true;
  }
- void startDownload(String link,String filename,String mime){
+ void startDownload(String link,String filename,String mime){startDownload(link,filename,mime,null);}
+ void startDownload(String link,String filename,String mime,String sourceReferer){
   try{
    Uri u=Uri.parse(link);
    if(!"https".equalsIgnoreCase(u.getScheme())&&!"http".equalsIgnoreCase(u.getScheme())){
@@ -1569,7 +1572,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
    WebView current=tabs.isEmpty()?null:active();
    String agent=current==null?"MH Browser":current.getSettings().getUserAgentString();
-   String referer=current==null?"":current.getUrl();
+   String referer=sourceReferer!=null&&!sourceReferer.isEmpty()?sourceReferer:current==null?"":current.getUrl();
    String cookie=CookieManager.getInstance().getCookie(link);
    // Use our own foreground download service for website files, just like media.
    // Do not enqueue Android DownloadManager: that produces a separate system notification.
