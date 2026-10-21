@@ -236,7 +236,7 @@ public final class MediaDownloadEngine {
      // Never block the yt-dlp output callback while paused. Blocking it can
      // deadlock process termination and freeze the app during Pause/Delete.
      if(control.isCancelled()||control.pauseGeneration()!=generation)
-      throw new java.util.concurrent.CancellationException("Download stopped by user");
+      return kotlin.Unit.INSTANCE; // Stop reporting; subprocess termination is asynchronous.
      callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
      return kotlin.Unit.INSTANCE;
     });
