@@ -1826,10 +1826,20 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    }
    if(id==-2&&("Preparing".equals(item.optString("state"))||"Downloading".equals(item.optString("state"))||"Paused".equals(item.optString("state")))){
     String task=item.optString("task");boolean paused="Paused".equals(item.optString("state"));
+    LinearLayout controls=column();controls.setPadding(dp(5),0,0,0);card.addView(controls);
     TextView toggle=text(paused?"▶ Resume":"Ⅱ Pause",12,WHITE);
-    toggle.setGravity(Gravity.CENTER);toggle.setPadding(dp(10),dp(12),dp(10),dp(12));
-    toggle.setBackground(grad(0xff2373a8,0xff1a4f7a,10));card.addView(toggle);
+    toggle.setGravity(Gravity.CENTER);toggle.setPadding(dp(10),dp(11),dp(10),dp(11));
+    toggle.setBackground(grad(0xff2373a8,0xff1a4f7a,10));controls.addView(toggle);
     toggle.setOnClickListener(v->{toggle.setEnabled(false);MediaDownloadService.setPaused(this,task,!paused);downloadUiHandler.postDelayed(this::refreshCompletedDownloadRows,450);});
+    TextView remove=text("✕ Delete",12,WHITE);
+    remove.setGravity(Gravity.CENTER);remove.setPadding(dp(10),dp(9),dp(10),dp(9));
+    LinearLayout.LayoutParams removeLp=new LinearLayout.LayoutParams(-1,-2);removeLp.topMargin=dp(6);
+    remove.setBackground(grad(0xff914044,0xff61262e,10));controls.addView(remove,removeLp);
+    remove.setOnClickListener(v->themed().setTitle("Delete download?").setMessage("Stop this transfer and discard its unfinished data?")
+     .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{
+      MediaDownloadService.deleteDownload(this,task);
+      downloadUiHandler.postDelayed(this::refreshCompletedDownloadRows,300);
+     }).show());
    }
    if(status==DownloadManager.STATUS_SUCCESSFUL){
     View.OnClickListener openDownloaded=v->{
