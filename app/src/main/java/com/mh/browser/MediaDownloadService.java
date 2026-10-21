@@ -20,6 +20,7 @@ public class MediaDownloadService extends Service {
  public static final String CHANNEL="mh_media_downloads_v1";
  private final AtomicInteger active=new AtomicInteger();
  private NotificationManager manager;
+ private static volatile MediaDownloadService liveService;
  private static final java.util.concurrent.ConcurrentHashMap<String,Control> controls=new java.util.concurrent.ConcurrentHashMap<>();
  private static class Control implements MediaDownloadEngine.PauseControl{
   volatile boolean paused,done,cancelled;
@@ -49,12 +50,16 @@ public class MediaDownloadService extends Service {
   }
  }
  public static void deleteDownload(Context context,String task){
-  Intent i=new Intent(context,MediaDownloadService.class).setAction("MH_DELETE").putExtra("task",task);
-  context.startService(i);
+  MediaDownloadService live=liveService;
+  if(live!=null){live.deleteTask(task);return;}
+  try{context.startService(new Intent(context,MediaDownloadService.class).setAction("MH_DELETE").putExtra("task",task));}
+  catch(IllegalStateException ex){android.util.Log.w("MHDownloads","Cannot stop inactive download service",ex);}
  }
  public static void setPaused(Context context,String task,boolean paused){
-  Intent i=new Intent(context,MediaDownloadService.class).setAction(paused?"MH_PAUSE":"MH_RESUME").putExtra("task",task);
-  context.startService(i);
+  MediaDownloadService live=liveService;
+  if(live!=null){live.change(task,paused);return;}
+  try{context.startService(new Intent(context,MediaDownloadService.class).setAction(paused?"MH_PAUSE":"MH_RESUME").putExtra("task",task));}
+  catch(IllegalStateException ex){android.util.Log.w("MHDownloads","Cannot control inactive download service",ex);}
  }
  private void deleteTask(String task){
   if(task==null||task.isEmpty())return;
@@ -90,6 +95,7 @@ public class MediaDownloadService extends Service {
  @Override public void onCreate(){
   super.onCreate();
   manager=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+  liveService=this;
   if(Build.VERSION.SDK_INT>=26){
    NotificationChannel c=new NotificationChannel(CHANNEL,"Media downloads",NotificationManager.IMPORTANCE_LOW);
    c.setDescription("Download progress and completion for MH Browser");
@@ -365,5 +371,6 @@ public class MediaDownloadService extends Service {
    }catch(Exception ignored){}
   }
  }
+ @Override public void onDestroy(){if(liveService==this)liveService=null;super.onDestroy();}
  @Override public android.os.IBinder onBind(Intent i){return null;}
 }
