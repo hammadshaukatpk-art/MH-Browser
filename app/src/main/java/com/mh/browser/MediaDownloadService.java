@@ -22,7 +22,7 @@ public class MediaDownloadService extends Service {
  private NotificationManager manager;
  private static final java.util.concurrent.ConcurrentHashMap<String,Control> controls=new java.util.concurrent.ConcurrentHashMap<>();
  private static class Control implements MediaDownloadEngine.PauseControl{
-  volatile boolean paused,done;
+  volatile boolean paused,done,cancelled;
   volatile String processId;
   volatile long generation;
   synchronized void change(boolean p){
@@ -35,7 +35,9 @@ public class MediaDownloadService extends Service {
    }
    notifyAll();
   }
-  @Override public synchronized void await() throws InterruptedException{while(paused&&!done)wait();}
+  @Override public synchronized void await() throws InterruptedException{while(paused&&!done)wait();if(cancelled)throw new InterruptedException("Download deleted");}
+  @Override public boolean isCancelled(){return cancelled;}
+  synchronized void cancel(){cancelled=true;done=true;generation++;String id=processId;if(id!=null)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}notifyAll();}
   @Override public long pauseGeneration(){return generation;}
   @Override public void processStarted(String id){
    processId=id;
@@ -43,9 +45,26 @@ public class MediaDownloadService extends Service {
   }
   @Override public void processFinished(String id){if(id.equals(processId))processId=null;}
  }
+ public static void deleteDownload(Context context,String task){
+  Intent i=new Intent(context,MediaDownloadService.class).setAction("MH_DELETE").putExtra("task",task);
+  context.startService(i);
+ }
  public static void setPaused(Context context,String task,boolean paused){
   Intent i=new Intent(context,MediaDownloadService.class).setAction(paused?"MH_PAUSE":"MH_RESUME").putExtra("task",task);
   context.startService(i);
+ }
+ private void deleteTask(String task){
+  if(task==null||task.isEmpty())return;
+  Control c=controls.get(task);if(c!=null)c.cancel();
+  manager.cancel(notificationId(task));
+  synchronized(MediaDownloadService.class){
+   android.content.SharedPreferences p=getSharedPreferences("mh",0);
+   JSONArray src;try{src=new JSONArray(p.getString("downloads","[]"));}catch(Exception e){src=new JSONArray();}
+   JSONArray keep=new JSONArray();for(int i=0;i<src.length();i++){JSONObject item=src.optJSONObject(i);if(item!=null&&!task.equals(item.optString("task")))keep.put(item);}
+   p.edit().putString("downloads",keep.toString()).commit();
+  }
+  bytesByTask.remove(task);
+  File partial=partial(this,task);if(partial.exists())partial.delete();
  }
  private void change(String task,boolean pause){
   Control c=controls.get(task);if(c==null||c.done)return;
@@ -62,6 +81,7 @@ public class MediaDownloadService extends Service {
  }
 
  private final java.util.concurrent.ConcurrentHashMap<String,Long> lastWriteByTask=new java.util.concurrent.ConcurrentHashMap<>();
+ private final java.util.concurrent.ConcurrentHashMap<String,Long> bytesByTask=new java.util.concurrent.ConcurrentHashMap<>();
  @Override public void onCreate(){
   super.onCreate();
   manager=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -131,12 +151,13 @@ public class MediaDownloadService extends Service {
      try(InputStream in=new BufferedInputStream(connection.getInputStream());OutputStream out=new BufferedOutputStream(new FileOutputStream(file,offset>0))){
       byte[] buffer=new byte[65536];int n;
       while((n=in.read(buffer))!=-1){
+       if(c.cancelled)throw new InterruptedException("Download deleted");
        if(c.paused){suspended=true;break;}
        out.write(buffer,0,n);bytes+=n;
        long now=SystemClock.elapsedRealtime();
        if(now-last>=700){
         int percent=total>0?(int)Math.min(99,Math.max(1,bytes*100/total)):1;
-        String detail=total>0?(bytes/1024)+" / "+(total/1024)+" KB":(bytes/1024)+" KB received";
+        String detail=total>0?formatSize(bytes)+" / "+formatSize(total):formatSize(bytes)+" downloaded";
         save(task,name,"Downloading",percent,detail,null,null);
         manager.notify(id,notification("MH Browser • Downloading",name+" • "+detail,percent,true,false,task,false));last=now;
        }
@@ -150,6 +171,7 @@ public class MediaDownloadService extends Service {
     }finally{connection.disconnect();}
    }
    c.await();
+   if(c.cancelled)throw new InterruptedException("Download deleted");
    Uri stored;
    if(Build.VERSION.SDK_INT>=29){
     ContentValues values=new ContentValues();values.put(MediaStore.Downloads.DISPLAY_NAME,name);values.put(MediaStore.Downloads.MIME_TYPE,mime);
@@ -171,17 +193,19 @@ public class MediaDownloadService extends Service {
     }
     stored=FileProvider.getUriForFile(this,getPackageName()+".fileprovider",dest);
    }
+   if(c.cancelled){getContentResolver().delete(stored,null,null);throw new InterruptedException("Download deleted");}
    success=true;save(task,name,"Completed",100,"Download complete",stored.toString(),mime);
    manager.notify(id,completedNotification(task,name,stored.toString(),mime));
-  }catch(InterruptedException ex){Thread.currentThread().interrupt();save(task,name,"Failed",0,"Download interrupted",null,null);}
-  catch(Exception ex){save(task,name,"Failed",0,ex.getMessage()==null?"Download failed":ex.getMessage(),null,null);
-   manager.notify(id,notification("MH Browser • Download failed",shortText(ex.getMessage()),0,false,true));
+  }catch(InterruptedException ex){Thread.currentThread().interrupt();if(!c.cancelled)save(task,name,"Failed",0,"Download interrupted",null,null);}
+  catch(Exception ex){if(!c.cancelled){save(task,name,"Failed",0,ex.getMessage()==null?"Download failed":ex.getMessage(),null,null);
+   manager.notify(id,notification("MH Browser • Download failed",shortText(ex.getMessage()),0,false,true));}
   }finally{
-   if(success)file.delete();c.done=true;c.change(false);controls.remove(task,c);lastWriteByTask.remove(task);finish(startId);
+   if(success||c.cancelled)file.delete();c.done=true;c.change(false);controls.remove(task,c);lastWriteByTask.remove(task);bytesByTask.remove(task);finish(startId);
   }
  }
  @Override public int onStartCommand(Intent intent,int flags,int startId){
   if(intent==null)return START_NOT_STICKY;
+  if("MH_DELETE".equals(intent.getAction())){deleteTask(intent.getStringExtra("task"));return START_NOT_STICKY;}
   if("MH_PAUSE".equals(intent.getAction())||"MH_RESUME".equals(intent.getAction())){
    change(intent.getStringExtra("task"),"MH_PAUSE".equals(intent.getAction()));return START_NOT_STICKY;
   }
@@ -216,24 +240,25 @@ public class MediaDownloadService extends Service {
     if(last!=null&&now-last<650&&percent<100)return;
     lastWriteByTask.put(task,now);
     String speed=extractSpeed(line);
-    String amount=downloadAmount(line,percent);
+    String amount=downloadAmount(task,line);
     boolean transferring=percent>0||!amount.isEmpty()||(line!=null&&line.contains("[download]"));
     String detail=transferring?(amount.isEmpty()?(speed.isEmpty()?"Receiving media…":speed):amount+(speed.isEmpty()?"":" • "+speed)):"Connecting to media…";
     save(task,displayTitle,transferring?"Downloading":"Preparing",percent,detail,null,null);
     manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",displayTitle+" • "+detail,percent,true,false,task,false));
    }
    @Override public void completed(String name,String uri,String mime){
+    if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}return;}
     save(task,name,"Completed",100,"Download complete",uri,mime);
     manager.notify(id,completedNotification(task,name,uri,mime));
     control.done=true;control.change(false);controls.remove(task,control);
-    lastWriteByTask.remove(task);
+    lastWriteByTask.remove(task);bytesByTask.remove(task);
     finish(startId);
    }
    @Override public void failed(String error){
-    save(task,displayTitle,"Failed",0,error,null,null);
-    manager.notify(id,notification("Download failed",shortText(error),0,false,true));
+    if(!control.cancelled)save(task,displayTitle,"Failed",0,error,null,null);
+    if(!control.cancelled)manager.notify(id,notification("Download failed",shortText(error),0,false,true));
     control.done=true;control.change(false);controls.remove(task,control);
-    lastWriteByTask.remove(task);
+    lastWriteByTask.remove(task);bytesByTask.remove(task);
     finish(startId);
    }
   });
@@ -246,18 +271,19 @@ public class MediaDownloadService extends Service {
   }
  }
  private static int notificationId(String task){return 2000+(task.hashCode()&0x3fffffff);}
- private static String downloadAmount(String line,int percent){
+ private static String formatSize(long bytes){
+  double mb=bytes/1000000d;
+  if(mb>=1000)return String.format(java.util.Locale.US,"%.2f GB",mb/1000d);
+  return String.format(java.util.Locale.US,"%.1f MB",mb);
+ }
+ private String downloadAmount(String task,String line){
   if(line==null)return "";
-  // yt-dlp progress may contain a huge raw log line. Extract only the
-  // advertised total size, and show a clean transferred / total MB value.
-  Matcher m=Pattern.compile("\\bof\\s+~?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(GiB|MiB|KiB|GB|MB|KB)\\b",Pattern.CASE_INSENSITIVE).matcher(line);
+  Matcher m=Pattern.compile("MH_STORED_BYTES=([0-9]+)").matcher(line);
   if(!m.find())return "";
-  double n;try{n=Double.parseDouble(m.group(1));}catch(Exception e){return "";}
-  String unit=m.group(2).toLowerCase(java.util.Locale.ROOT);
-  double total=n*(unit.startsWith("gi")?1073.741824:unit.startsWith("mi")?1.048576:unit.startsWith("ki")?0.001024:unit.equals("gb")?1000:unit.equals("kb")?0.001:1);
-  if(total<=0||total>10000000)return "";
-  double done=total*Math.max(0,Math.min(100,percent))/100d;
-  return String.format(java.util.Locale.US,"%.1f MB / %.1f MB",done,total);
+  long bytes;try{bytes=Long.parseLong(m.group(1));}catch(Exception ex){return "";}
+  bytesByTask.merge(task,bytes,Math::max);
+  long stored=bytesByTask.getOrDefault(task,0L);
+  return stored>0?formatSize(stored)+" downloaded":"";
  }
  private static String extractSpeed(String line){
   if(line==null)return "";
@@ -282,7 +308,7 @@ public class MediaDownloadService extends Service {
   PendingIntent click=PendingIntent.getActivity(this,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
   Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
   b.setSmallIcon(android.R.drawable.stat_sys_download)
-   .setContentTitle(title).setContentText(shortText(message))
+   .setContentTitle(title).setContentText(shortText(message)).setSubText("MH Browser")
    .setContentIntent(click).setAutoCancel(!ongoing).setOngoing(ongoing)
    .setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE);
   if(ongoing){b.setProgress(100,percent,percent<=0);
@@ -290,6 +316,9 @@ public class MediaDownloadService extends Service {
     Intent action=new Intent(this,MediaDownloadService.class).setAction(paused?"MH_RESUME":"MH_PAUSE").putExtra("task",task);
     PendingIntent command=PendingIntent.getService(this,notificationId(task),action,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     b.addAction(new Notification.Action.Builder(paused?android.R.drawable.ic_media_play:android.R.drawable.ic_media_pause,paused?"Resume":"Pause",command).build());
+    Intent delete=new Intent(this,MediaDownloadService.class).setAction("MH_DELETE").putExtra("task",task);
+    PendingIntent deleteCommand=PendingIntent.getService(this,notificationId(task)+1,delete,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+    b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_delete,"Delete",deleteCommand).build());
    }
   }
   else b.setSmallIcon(failed?android.R.drawable.stat_notify_error:android.R.drawable.stat_sys_download_done);
