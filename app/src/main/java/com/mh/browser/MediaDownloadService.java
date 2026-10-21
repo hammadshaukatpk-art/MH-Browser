@@ -23,8 +23,25 @@ public class MediaDownloadService extends Service {
  private static final java.util.concurrent.ConcurrentHashMap<String,Control> controls=new java.util.concurrent.ConcurrentHashMap<>();
  private static class Control implements MediaDownloadEngine.PauseControl{
   volatile boolean paused,done;
-  synchronized void change(boolean p){paused=p;notifyAll();}
+  volatile String processId;
+  volatile long generation;
+  synchronized void change(boolean p){
+   if(done||paused==p)return;
+   paused=p;
+   if(p){
+    generation++;
+    String id=processId;
+    if(id!=null)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}
+   }
+   notifyAll();
+  }
   @Override public synchronized void await() throws InterruptedException{while(paused&&!done)wait();}
+  @Override public long pauseGeneration(){return generation;}
+  @Override public void processStarted(String id){
+   processId=id;
+   if(paused)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}
+  }
+  @Override public void processFinished(String id){if(id.equals(processId))processId=null;}
  }
  public static void setPaused(Context context,String task,boolean paused){
   Intent i=new Intent(context,MediaDownloadService.class).setAction(paused?"MH_PAUSE":"MH_RESUME").putExtra("task",task);
@@ -199,10 +216,11 @@ public class MediaDownloadService extends Service {
     if(last!=null&&now-last<650&&percent<100)return;
     lastWriteByTask.put(task,now);
     String speed=extractSpeed(line);
-    boolean transferring=percent>0;
-    String info=transferring?percent+"%"+(speed.isEmpty()?"":" • "+speed):shortText(line);
-    save(task,displayTitle,transferring?"Downloading":"Preparing",percent,transferring?speed:shortText(line),null,null);
-    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",info,percent,true,false,task,false));
+    String amount=downloadAmount(line,percent);
+    boolean transferring=percent>0||!amount.isEmpty()||(line!=null&&line.contains("[download]"));
+    String detail=transferring?(amount.isEmpty()?(speed.isEmpty()?"Receiving media…":speed):amount+(speed.isEmpty()?"":" • "+speed)):"Connecting to media…";
+    save(task,displayTitle,transferring?"Downloading":"Preparing",percent,detail,null,null);
+    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",displayTitle+" • "+detail,percent,true,false,task,false));
    }
    @Override public void completed(String name,String uri,String mime){
     save(task,name,"Completed",100,"Download complete",uri,mime);
@@ -228,6 +246,19 @@ public class MediaDownloadService extends Service {
   }
  }
  private static int notificationId(String task){return 2000+(task.hashCode()&0x3fffffff);}
+ private static String downloadAmount(String line,int percent){
+  if(line==null)return "";
+  // yt-dlp progress may contain a huge raw log line. Extract only the
+  // advertised total size, and show a clean transferred / total MB value.
+  Matcher m=Pattern.compile("\\bof\\s+~?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(GiB|MiB|KiB|GB|MB|KB)\\b",Pattern.CASE_INSENSITIVE).matcher(line);
+  if(!m.find())return "";
+  double n;try{n=Double.parseDouble(m.group(1));}catch(Exception e){return "";}
+  String unit=m.group(2).toLowerCase(java.util.Locale.ROOT);
+  double total=n*(unit.startsWith("gi")?1073.741824:unit.startsWith("mi")?1.048576:unit.startsWith("ki")?0.001024:unit.equals("gb")?1000:unit.equals("kb")?0.001:1);
+  if(total<=0||total>10000000)return "";
+  double done=total*Math.max(0,Math.min(100,percent))/100d;
+  return String.format(java.util.Locale.US,"%.1f MB / %.1f MB",done,total);
+ }
  private static String extractSpeed(String line){
   if(line==null)return "";
   Matcher m=Pattern.compile("([0-9]+(?:\\.[0-9]+)?\\s*(?:KiB|MiB|GiB|KB|MB|GB)/s)",Pattern.CASE_INSENSITIVE).matcher(line);
@@ -258,7 +289,7 @@ public class MediaDownloadService extends Service {
    if(task!=null&&!task.isEmpty()){
     Intent action=new Intent(this,MediaDownloadService.class).setAction(paused?"MH_RESUME":"MH_PAUSE").putExtra("task",task);
     PendingIntent command=PendingIntent.getService(this,notificationId(task),action,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-    b.addAction(new Notification.Action.Builder(android.R.drawable.ic_media_pause,paused?"Resume":"Pause",command).build());
+    b.addAction(new Notification.Action.Builder(paused?android.R.drawable.ic_media_play:android.R.drawable.ic_media_pause,paused?"Resume":"Pause",command).build());
    }
   }
   else b.setSmallIcon(failed?android.R.drawable.stat_notify_error:android.R.drawable.stat_sys_download_done);
