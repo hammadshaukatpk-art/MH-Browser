@@ -2112,7 +2112,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   card.setOnClickListener(v->{
    if(lightTheme==chooseLight)return;
    lightTheme=chooseLight;prefs.edit().putBoolean("lightTheme",lightTheme).apply();
-   applyThemeBars();themeSettings();
+   applyThemeBars();controls();themeSettings();
   });
  }
  void privacy(){
