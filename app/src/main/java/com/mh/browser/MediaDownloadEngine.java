@@ -233,7 +233,10 @@ public final class MediaDownloadEngine {
    try{
     control.await();
     YoutubeDL.getInstance().execute(req,processId,false,(percent,eta,line)->{
-     try{control.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
+     // Never block the yt-dlp output callback while paused. Blocking it can
+     // deadlock process termination and freeze the app during Pause/Delete.
+     if(control.isCancelled()||control.pauseGeneration()!=generation)
+      throw new java.util.concurrent.CancellationException("Download stopped by user");
      callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
      return kotlin.Unit.INSTANCE;
     });
