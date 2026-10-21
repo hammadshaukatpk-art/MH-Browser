@@ -30,20 +30,23 @@ public class MediaDownloadService extends Service {
    paused=p;
    if(p){
     generation++;
-    String id=processId;
-    if(id!=null)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}
+    terminateProcessAsync(processId);
    }
    notifyAll();
   }
   @Override public synchronized void await() throws InterruptedException{while(paused&&!done)wait();if(cancelled)throw new InterruptedException("Download deleted");}
   @Override public boolean isCancelled(){return cancelled;}
-  synchronized void cancel(){cancelled=true;done=true;generation++;String id=processId;if(id!=null)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}notifyAll();}
+  synchronized void cancel(){cancelled=true;done=true;generation++;terminateProcessAsync(processId);notifyAll();}
   @Override public long pauseGeneration(){return generation;}
   @Override public void processStarted(String id){
    processId=id;
-   if(paused)try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Exception ignored){}
+   if(paused||cancelled)terminateProcessAsync(id);
   }
   @Override public void processFinished(String id){if(id.equals(processId))processId=null;}
+  private static void terminateProcessAsync(String id){
+   if(id==null)return;
+   new Thread(()->{try{com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(id);}catch(Throwable ignored){}},"mh-stop-media").start();
+  }
  }
  public static void deleteDownload(Context context,String task){
   Intent i=new Intent(context,MediaDownloadService.class).setAction("MH_DELETE").putExtra("task",task);
