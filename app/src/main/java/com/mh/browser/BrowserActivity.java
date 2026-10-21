@@ -1475,10 +1475,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(verifiedFormats[0])return;
     lastFormatError[0]=error;
     state.setText(embeddedSearching[0]?"Checking the embedded player's formats. Available quality options will appear if the host exposes them.":"Page inspection unavailable. Play the video to capture its stream, or retry once the player loads.");
-    settingRow(options,"↻  Retry format detection","Recheck the current video and its embedded player",()->{
-     mediaFormatCache.remove(initialUrl);mediaTitleCache.remove(initialUrl);
-     dialog.dismiss();showMediaDownloadPanel(initialUrl,web);
-    });
+    // Do not show retry/diagnostic rows in the media choice list.
    }
   });
   // Direct media links, if any, appear without delaying the network format lookup.
@@ -1639,13 +1636,13 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  void addFormatChoices(LinearLayout options,String url,java.util.List<MediaDownloadEngine.Choice> choices,AlertDialog dialog){
   if(choices==null||choices.isEmpty())return;
-  TextView videoLabel=text("VIDEO RESOLUTIONS",12,0xff74d8ff);
+  TextView videoLabel=text("DETECTED MEDIA • VIDEO",12,0xff74d8ff);
   videoLabel.setPadding(dp(8),dp(16),0,dp(8));options.addView(videoLabel);
   for(MediaDownloadEngine.Choice c:choices){
    if(c.audioFormat!=null)continue;
    settingRow(options,"▣  "+c.label,"Download available video and audio",()->confirmMediaChoice(url,c,dialog));
   }
-  TextView audioLabel=text("AUDIO FORMATS",12,0xff74d8ff);
+  TextView audioLabel=text("DETECTED MEDIA • AUDIO",12,0xff74d8ff);
   audioLabel.setPadding(dp(8),dp(16),0,dp(8));options.addView(audioLabel);
   for(MediaDownloadEngine.Choice c:choices){
    if(c.audioFormat==null)continue;
