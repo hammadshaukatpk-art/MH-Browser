@@ -74,10 +74,17 @@ public class BrowserActivity extends Activity {
    ProgressBar progress=downloadProgressViews.get(task);
    if(status!=null){
     String state=item.optString("state","Pending");
-    status.setText(state+" • "+item.optInt("progress",0)+"%"+cleanDownloadDetail(item.optString("detail","")));
+    status.setText(downloadProgressLabel(item));
    }
-   if(progress!=null){progress.setProgress(item.optInt("progress",0));
-    progress.setVisibility("Downloading".equals(item.optString("state"))?View.VISIBLE:View.GONE);}
+   if(progress!=null){
+    String state=item.optString("state");
+    progress.setIndeterminate("Preparing".equals(state));
+    if(!"Preparing".equals(state)){
+     if(android.os.Build.VERSION.SDK_INT>=24)progress.setProgress(item.optInt("progress",0),true);
+     else progress.setProgress(item.optInt("progress",0));
+    }
+    progress.setVisibility("Downloading".equals(state)||"Preparing".equals(state)||"Paused".equals(state)?View.VISIBLE:View.GONE);
+   }
   }
   if(count!=downloadStatusViews.size()){refreshCompletedDownloadRows();return;}
   downloadUiHandler.postDelayed(this,500);
@@ -1541,7 +1548,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  void showDirectChoices(LinearLayout container,JSONArray direct,AlertDialog dialog){
   container.removeAllViews();
   if(direct==null||direct.length()==0)return;
-  TextView heading=text("INSTANT DIRECT MEDIA • NO EXTRACTION",12,0xff74d8ff);
+  TextView heading=text("DETECTED MEDIA • VIDEO & AUDIO FORMATS",12,0xff74d8ff);
   heading.setPadding(dp(8),dp(12),0,dp(8));container.addView(heading);
   for(int i=0;i<direct.length();i++){
    JSONObject source=direct.optJSONObject(i);if(source==null)continue;
@@ -1549,7 +1556,11 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    String kind=source.optString("kind","Video"),label=source.optString("label");
    if(link.isEmpty())continue;
    String display="↓  "+kind+(label.isEmpty()?" • Original quality":" • "+label);
-   settingRow(container,display,"HLS".equals(kind)?"Save an accessible, unprotected HLS stream":"Save detected direct media file",()->{
+   if("HLS".equals(kind)){
+    addHlsResolutions(container,link,source.optString("referer",""),dialog);
+    continue;
+   }
+   settingRow(container,display,"Save detected direct media file",()->{
     if(dialog.isShowing())dialog.dismiss();
     if("HLS".equals(kind)){
      WebView w=tabs.isEmpty()?null:active();
@@ -1560,10 +1571,10 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
     }else startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
    });
-   if("HLS".equals(kind))addHlsResolutions(container,link,source.optString("referer",""),dialog);
   }
  }
  final Map<AlertDialog,Set<String>> hlsRequests=new java.util.WeakHashMap<>();
+ final Map<AlertDialog,Set<String>> hlsRendered=new java.util.WeakHashMap<>();
  void addHlsResolutions(LinearLayout container,String playlist,String sourceReferer,AlertDialog dialog){
   Set<String> requested=hlsRequests.computeIfAbsent(dialog,k->new HashSet<>());
   if(!requested.add(playlist))return;
@@ -1575,22 +1586,27 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    @Override public void ready(java.util.List<HlsFormatInspector.Variant> formats){
     runOnUiThread(()->{
      if(!dialog.isShowing())return;
-     TextView label=text("CONFIRMED STREAM QUALITIES",12,0xff74d8ff);
-     label.setPadding(dp(8),dp(8),0,dp(8));container.addView(label);
+     Set<String> rendered=hlsRendered.computeIfAbsent(dialog,k->new HashSet<>());
+     if(rendered.add("heading")){
+      TextView label=text("DETECTED VIDEO QUALITIES",12,0xff74d8ff);
+      label.setPadding(dp(8),dp(8),0,dp(8));container.addView(label);
+     }
      for(HlsFormatInspector.Variant variant:formats){
-      settingRow(container,"▣  "+variant.label,"Download detected stream at this quality",()->{
+      String key=variant.height>0?"height:"+variant.height:"unknown";
+      if(!rendered.add(key))continue;
+      settingRow(container,"▣  "+(variant.height>0?"Video • "+variant.height+"p (HLS)":"Video • source quality (resolution not advertised)"),"Download this accessible stream quality",()->{
        dialog.dismiss();
        MediaDownloadService.enqueue(getApplicationContext(),variant.url,
         new MediaDownloadEngine.Choice(variant.label,0,null),referer,agent,mediaTitleForDownload(page));
        Toast.makeText(BrowserActivity.this,"Video download queued • See Downloads for Pause / Resume",Toast.LENGTH_LONG).show();
       });
      }
-     settingRow(container,"♫  Audio • MP3","Extract audio from this accessible stream",()->{
+     if(rendered.add("audio-mp3"))settingRow(container,"♫  Audio • MP3","Extract audio from this accessible stream",()->{
       dialog.dismiss();
       MediaDownloadService.enqueue(getApplicationContext(),playlist,
        new MediaDownloadEngine.Choice("Audio • MP3",0,"mp3"),referer,agent,mediaTitleForDownload(page));
      });
-     settingRow(container,"♫  Audio • M4A","Extract audio from this accessible stream",()->{
+     if(rendered.add("audio-m4a"))settingRow(container,"♫  Audio • M4A","Extract audio from this accessible stream",()->{
       dialog.dismiss();
       MediaDownloadService.enqueue(getApplicationContext(),playlist,
        new MediaDownloadEngine.Choice("Audio • M4A",0,"m4a"),referer,agent,mediaTitleForDownload(page));
@@ -1713,6 +1729,17 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
  }
  // Old saved download records sometimes contain a second percentage in their detail.
  // Keep exactly one percent in the UI, followed by optional speed/status text.
+ String downloadProgressLabel(JSONObject item){
+  String state=item.optString("state","Pending");
+  int pct=item.optInt("progress",0);
+  String detail=item.optString("detail","");
+  if("Preparing".equals(state))return "Preparing download • Connecting to media…";
+  if("Paused".equals(state))return "Paused • "+pct+"%"+(detail.contains("MB /")?cleanDownloadDetail(detail):"");
+  if("Downloading".equals(state))return "Downloading • "+pct+"%"+cleanDownloadDetail(detail);
+  if("Completed".equals(state))return "Completed • 100%";
+  if("Failed".equals(state))return "Failed"+cleanDownloadDetail(detail);
+  return state;
+ }
  String cleanDownloadDetail(String detail){
   if(detail==null)return "";
   String clean=detail.trim().replaceFirst("^\\d{1,3}%\\s*(?:[•|\\-]\\s*)?","");
@@ -1767,7 +1794,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     if(cursor!=null&&cursor.moveToFirst())status=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
    }catch(Exception ignored){}
    String state=status==DownloadManager.STATUS_SUCCESSFUL?"Completed":status==DownloadManager.STATUS_FAILED?"Failed":status==DownloadManager.STATUS_RUNNING?"Downloading":"Pending";
-   TextView statusLine=text(date+" • "+state+(id==-2?" • "+item.optInt("progress",0)+"%"+cleanDownloadDetail(item.optString("detail","")):""),12,GRAY);
+   TextView statusLine=text(id==-2?downloadProgressLabel(item):date+" • "+state,12,GRAY);
    info.addView(statusLine);
    if(id==-2){
     String task=item.optString("task");downloadStatusViews.put(task,statusLine);
@@ -1776,7 +1803,9 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
     p.setProgress(item.optInt("progress",0));
     LinearLayout.LayoutParams progressLp=new LinearLayout.LayoutParams(-1,dp(5));progressLp.topMargin=dp(7);
     info.addView(p,progressLp);
-    p.setVisibility(status==DownloadManager.STATUS_RUNNING?View.VISIBLE:View.GONE);
+    String liveState=item.optString("state","");
+    p.setIndeterminate("Preparing".equals(liveState));
+    p.setVisibility("Preparing".equals(liveState)||"Downloading".equals(liveState)||"Paused".equals(liveState)?View.VISIBLE:View.GONE);
     downloadProgressViews.put(task,p);
    }
    if(id==-2&&("Preparing".equals(item.optString("state"))||"Downloading".equals(item.optString("state"))||"Paused".equals(item.optString("state")))){
