@@ -66,7 +66,7 @@ public class MediaDownloadService extends Service {
    JSONArray keep=new JSONArray();for(int i=0;i<src.length();i++){JSONObject item=src.optJSONObject(i);if(item!=null&&!task.equals(item.optString("task")))keep.put(item);}
    p.edit().putString("downloads",keep.toString()).commit();
   }
-  bytesByTask.remove(task);
+  bytesByTask.remove(task);estimatedTotals.remove(task);
   File partial=partial(this,task);if(partial.exists())partial.delete();
  }
  private void change(String task,boolean pause){
@@ -77,7 +77,7 @@ public class MediaDownloadService extends Service {
    String name=item.optString("name","Download");int percent=item.optInt("progress");
    String oldDetail=item.optString("detail","");
    save(task,name,pause?"Paused":"Downloading",percent,pause?(oldDetail.isEmpty()?"Paused by user":oldDetail):(oldDetail.isEmpty()?"Resuming…":oldDetail),null,null);
-   manager.notify(notificationId(task),notification(pause?"MH Browser • Paused":"MH Browser • Downloading",name,percent,true,false,task,pause));break;
+   manager.notify(notificationId(task),notification(pause?"MH Browser • Paused":"MH Browser • Downloading",oldDetail.isEmpty()?name:oldDetail,percent,true,false,task,pause,name));break;
   }
  }
  private static File partial(Context c,String task){
@@ -86,6 +86,7 @@ public class MediaDownloadService extends Service {
 
  private final java.util.concurrent.ConcurrentHashMap<String,Long> lastWriteByTask=new java.util.concurrent.ConcurrentHashMap<>();
  private final java.util.concurrent.ConcurrentHashMap<String,Long> bytesByTask=new java.util.concurrent.ConcurrentHashMap<>();
+ private final java.util.concurrent.ConcurrentHashMap<String,Long> estimatedTotals=new java.util.concurrent.ConcurrentHashMap<>();
  @Override public void onCreate(){
   super.onCreate();
   manager=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -163,7 +164,7 @@ public class MediaDownloadService extends Service {
         int percent=total>0?(int)Math.min(99,Math.max(1,bytes*100/total)):1;
         String detail=total>0?formatSize(bytes)+" / "+formatSize(total):formatSize(bytes)+" downloaded";
         save(task,name,"Downloading",percent,detail,null,null);
-        manager.notify(id,notification("MH Browser • Downloading",name+" • "+detail,percent,true,false,task,false));last=now;
+        manager.notify(id,notification("MH Browser • Downloading",detail,percent,true,false,task,false,name));last=now;
        }
       }
       out.flush();
@@ -204,7 +205,7 @@ public class MediaDownloadService extends Service {
   catch(Exception ex){if(!c.cancelled){save(task,name,"Failed",0,ex.getMessage()==null?"Download failed":ex.getMessage(),null,null);
    manager.notify(id,notification("MH Browser • Download failed",shortText(ex.getMessage()),0,false,true));}
   }finally{
-   if(success||c.cancelled)file.delete();c.done=true;c.change(false);controls.remove(task,c);lastWriteByTask.remove(task);bytesByTask.remove(task);finish(startId);
+   if(success||c.cancelled)file.delete();c.done=true;c.change(false);controls.remove(task,c);lastWriteByTask.remove(task);bytesByTask.remove(task);estimatedTotals.remove(task);finish(startId);
   }
  }
  @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -238,7 +239,7 @@ public class MediaDownloadService extends Service {
   MediaDownloadEngine.download(getApplicationContext(),url,choice,intent.getStringExtra("referer"),intent.getStringExtra("userAgent"),intent.getStringExtra("titleHint"),control,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
    @Override public void progress(int percent,String line){
-    if(control.paused)return;
+    if(control.paused||control.cancelled||control.done)return;
     long now=SystemClock.elapsedRealtime();
     Long last=lastWriteByTask.get(task);
     if(last!=null&&now-last<650&&percent<100)return;
@@ -248,21 +249,21 @@ public class MediaDownloadService extends Service {
     boolean transferring=percent>0||!amount.isEmpty()||(line!=null&&line.contains("[download]"));
     String detail=transferring?(amount.isEmpty()?(speed.isEmpty()?"Receiving media…":speed):amount+(speed.isEmpty()?"":" • "+speed)):"Connecting to media…";
     save(task,displayTitle,transferring?"Downloading":"Preparing",percent,detail,null,null);
-    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",displayTitle+" • "+detail,percent,true,false,task,false));
+    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",detail,percent,true,false,task,false,displayTitle));
    }
    @Override public void completed(String name,String uri,String mime){
-    if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}controls.remove(task,control);lastWriteByTask.remove(task);bytesByTask.remove(task);finish(startId);return;}
+    if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}controls.remove(task,control);lastWriteByTask.remove(task);bytesByTask.remove(task);estimatedTotals.remove(task);finish(startId);return;}
     save(task,name,"Completed",100,"Download complete",uri,mime);
     manager.notify(id,completedNotification(task,name,uri,mime));
     control.done=true;control.change(false);controls.remove(task,control);
-    lastWriteByTask.remove(task);bytesByTask.remove(task);
+    lastWriteByTask.remove(task);bytesByTask.remove(task);estimatedTotals.remove(task);
     finish(startId);
    }
    @Override public void failed(String error){
     if(!control.cancelled)save(task,displayTitle,"Failed",0,error,null,null);
     if(!control.cancelled)manager.notify(id,notification("Download failed",shortText(error),0,false,true));
     control.done=true;control.change(false);controls.remove(task,control);
-    lastWriteByTask.remove(task);bytesByTask.remove(task);
+    lastWriteByTask.remove(task);bytesByTask.remove(task);estimatedTotals.remove(task);
     finish(startId);
    }
   });
@@ -287,7 +288,21 @@ public class MediaDownloadService extends Service {
   long bytes;try{bytes=Long.parseLong(m.group(1));}catch(Exception ex){return "";}
   bytesByTask.merge(task,bytes,Math::max);
   long stored=bytesByTask.getOrDefault(task,0L);
-  return stored>0?formatSize(stored)+" downloaded":"";
+  // HLS yt-dlp estimates can change between playlist fragments. Capture one
+  // plausible initial estimate per transfer and label it approximate.
+  if(!estimatedTotals.containsKey(task)){
+   Matcher estimate=Pattern.compile("\\bof\\s+~?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(GiB|MiB|KiB|GB|MB|KB)\\b",Pattern.CASE_INSENSITIVE).matcher(line);
+   if(estimate.find())try{
+    double n=Double.parseDouble(estimate.group(1));
+    String unit=estimate.group(2).toLowerCase(java.util.Locale.ROOT);
+    double factor=unit.equals("gib")?1073741824d:unit.equals("mib")?1048576d:unit.equals("kib")?1024d:unit.equals("gb")?1000000000d:unit.equals("mb")?1000000d:1000d;
+    long candidate=(long)(n*factor);
+    if(candidate>=stored&&candidate>0&&candidate<10000000000000L)estimatedTotals.putIfAbsent(task,candidate);
+   }catch(Exception ignored){}
+  }
+  long total=estimatedTotals.getOrDefault(task,0L);
+  if(total>0&&total>=stored)return formatSize(stored)+" / ~"+formatSize(total)+" (est.)";
+  return formatSize(stored)+" / total unknown";
  }
  private static String extractSpeed(String line){
   if(line==null)return "";
@@ -305,14 +320,16 @@ public class MediaDownloadService extends Service {
  }
  private static String shortText(String s){return s==null?"Unknown error":s.length()>100?s.substring(0,100):s;}
  private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed){return notification(title,message,percent,ongoing,failed,null,false);}
- private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed,String task,boolean paused){
+ private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed,String task,boolean paused){return notification(title,message,percent,ongoing,failed,task,paused,"MH Browser");}
+ private Notification notification(String title,String message,int percent,boolean ongoing,boolean failed,String task,boolean paused,String filename){
   Intent open=new Intent(this,BrowserActivity.class);
   open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
   open.putExtra("openDownloads",true);
   PendingIntent click=PendingIntent.getActivity(this,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
   Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
   b.setSmallIcon(android.R.drawable.stat_sys_download)
-   .setContentTitle(title).setContentText(shortText(message)).setSubText("MH Browser")
+   .setContentTitle(title).setContentText(shortText(message)).setSubText(shortText(filename))
+   .setStyle(new Notification.BigTextStyle().bigText(message))
    .setContentIntent(click).setAutoCancel(!ongoing).setOngoing(ongoing)
    .setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE);
   if(ongoing){b.setProgress(100,percent,percent<=0);
