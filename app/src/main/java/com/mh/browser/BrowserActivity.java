@@ -1383,7 +1383,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   layout.addView(movieName);
   TextView state=text("Choose a format below to download.",13,0xffa7c7e4);
   state.setPadding(dp(12),dp(12),dp(12),dp(12));
-  state.setBackground(grad(0xff1b3a57,0xff112943,12));layout.addView(state);
+  state.setBackground(grad(0xff1b3a57,0xff112943,12)); // Internal detection status, not user-facing.
   LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(-1,-2);op.topMargin=dp(12);layout.addView(options,op);
   LinearLayout directOptions=column();options.addView(directOptions);
   LinearLayout quickOptions=column();options.addView(quickOptions);
@@ -1416,8 +1416,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
    addFormatChoices(quickOptions,initialUrl,mediaFormatCache.get(initialUrl),dialog);
   }else state.setText("Checking playable video and audio formats. Available options appear below while detection runs…");
   if(!verifiedFormats[0]){
-   TextView hint=text("Reading actual video qualities and audio formats. Only confirmed formats or captured media links can be downloaded.",12,GRAY);
-   hint.setPadding(dp(8),dp(10),0,dp(8));quickOptions.addView(hint);
+   // No technical detection text in the user-facing panel.
   }
   JSONArray readyDirect=directMediaCache.get(initialUrl);
   if(readyDirect!=null)showDirectChoices(directOptions,readyDirect,dialog);
@@ -1438,8 +1437,7 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
      if(!embeddedOptionsAdded[0]){
       embeddedOptionsAdded[0]=true;
       quickOptions.removeAllViews();
-      TextView fallback=text("Embedded video found • checking exact qualities. You can try the options below while detection continues.",12,GRAY);
-      fallback.setPadding(dp(8),dp(8),0,dp(8));quickOptions.addView(fallback);
+      // Omit temporary detection notices.
       // Never offer an unsupported generic page as a confirmed download.
      }
      embeddedSearching[0]=true;
@@ -1545,37 +1543,45 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   }
   return title+"."+ext;
  }
+ void requestDownloadNotifications(){
+  if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+   requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},302);
+ }
  void showDirectChoices(LinearLayout container,JSONArray direct,AlertDialog dialog){
   container.removeAllViews();
+  hlsRequests.remove(dialog);hlsRendered.remove(dialog);hlsUnknown.remove(dialog);
   if(direct==null||direct.length()==0)return;
-  TextView heading=text("DETECTED MEDIA • VIDEO & AUDIO FORMATS",12,0xff74d8ff);
-  heading.setPadding(dp(8),dp(12),0,dp(8));container.addView(heading);
+  LinearLayout videos=column();container.addView(videos);
+  LinearLayout audios=column();container.addView(audios);
   for(int i=0;i<direct.length();i++){
    JSONObject source=direct.optJSONObject(i);if(source==null)continue;
    String link=source.optString("url"),mime=source.optString("type");
    String kind=source.optString("kind","Video"),label=source.optString("label");
    if(link.isEmpty())continue;
-   String display="↓  "+kind+(label.isEmpty()?" • Original quality":" • "+label);
    if("HLS".equals(kind)){
-    addHlsResolutions(container,link,source.optString("referer",""),dialog);
+    addHlsResolutions(videos,audios,link,source.optString("referer",""),dialog);
     continue;
    }
-   settingRow(container,display,"Save detected direct media file",()->{
+   LinearLayout destination=kind.toLowerCase(Locale.ROOT).contains("audio")?audios:videos;
+   Set<String> rendered=hlsRendered.computeIfAbsent(dialog,k->new HashSet<>());
+   if(!rendered.add("direct:"+link))continue;
+   String headerKey=destination==videos?"video-heading":"audio-heading";
+   if(rendered.add(headerKey)){
+    TextView heading=text(destination==videos?"DETECTED MEDIA • VIDEO":"DETECTED MEDIA • AUDIO",12,0xff74d8ff);
+    heading.setPadding(dp(8),dp(12),0,dp(8));destination.addView(heading,0);
+   }
+   String display="↓  "+kind+(label.isEmpty()?" • Original quality":" • "+label);
+   settingRow(destination,display,"Save detected direct media file",()->{
+    requestDownloadNotifications();
     if(dialog.isShowing())dialog.dismiss();
-    if("HLS".equals(kind)){
-     WebView w=tabs.isEmpty()?null:active();
-     String referer=source.optString("referer",w==null?"":w.getUrl());
-     String agent=w==null?null:w.getSettings().getUserAgentString();
-     MediaDownloadService.enqueue(getApplicationContext(),link,
-      new MediaDownloadEngine.Choice("HLS video • best available",0,null),referer,agent,mediaTitleForDownload(w==null?null:w.getUrl()));
-     Toast.makeText(this,"HLS stream queued. Check Downloads for actual progress.",Toast.LENGTH_LONG).show();
-    }else startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
+    startDownload(link,mediaFilename(link,mime),mime,source.optString("referer",""));
    });
   }
  }
  final Map<AlertDialog,Set<String>> hlsRequests=new java.util.WeakHashMap<>();
  final Map<AlertDialog,Set<String>> hlsRendered=new java.util.WeakHashMap<>();
- void addHlsResolutions(LinearLayout container,String playlist,String sourceReferer,AlertDialog dialog){
+ final Map<AlertDialog,View> hlsUnknown=new java.util.WeakHashMap<>();
+ void addHlsResolutions(LinearLayout videos,LinearLayout audios,String playlist,String sourceReferer,AlertDialog dialog){
   Set<String> requested=hlsRequests.computeIfAbsent(dialog,k->new HashSet<>());
   if(!requested.add(playlist))return;
   WebView w=tabs.isEmpty()?null:active();
@@ -1585,40 +1591,50 @@ AlertDialog.Builder themed(){return new MhDialogBuilder();}
   HlsFormatInspector.inspect(getApplicationContext(),playlist,referer,agent,new HlsFormatInspector.Callback(){
    @Override public void ready(java.util.List<HlsFormatInspector.Variant> formats){
     runOnUiThread(()->{
-     if(!dialog.isShowing())return;
+     if(!dialog.isShowing()||videos.getParent()==null)return;
      Set<String> rendered=hlsRendered.computeIfAbsent(dialog,k->new HashSet<>());
-     if(rendered.add("heading")){
-      TextView label=text("DETECTED VIDEO QUALITIES",12,0xff74d8ff);
-      label.setPadding(dp(8),dp(8),0,dp(8));container.addView(label);
-     }
      for(HlsFormatInspector.Variant variant:formats){
       String key=variant.height>0?"height:"+variant.height:"unknown";
+      if(variant.height==0&&rendered.stream().anyMatch(k->k.startsWith("height:")))continue;
+      if(variant.height>0){
+       View unknown=hlsUnknown.remove(dialog);
+       if(unknown!=null&&unknown.getParent() instanceof android.view.ViewGroup)
+        ((android.view.ViewGroup)unknown.getParent()).removeView(unknown);
+       rendered.remove("unknown");
+      }
       if(!rendered.add(key))continue;
-      settingRow(container,"▣  "+(variant.height>0?"Video • "+variant.height+"p (HLS)":"Video • source quality (resolution not advertised)"),"Download this accessible stream quality",()->{
+      if(rendered.add("video-heading")){
+       TextView heading=text("DETECTED MEDIA • VIDEO",12,0xff74d8ff);
+       heading.setPadding(dp(8),dp(12),0,dp(8));videos.addView(heading,0);
+      }
+      settingRow(videos,"▣  "+(variant.height>0?"Video • "+variant.height+"p (HLS)":"Video • source quality (resolution not advertised)"),"Download this accessible stream quality",()->{
+       requestDownloadNotifications();
        dialog.dismiss();
        MediaDownloadService.enqueue(getApplicationContext(),variant.url,
         new MediaDownloadEngine.Choice(variant.label,0,null),referer,agent,mediaTitleForDownload(page));
-       Toast.makeText(BrowserActivity.this,"Video download queued • See Downloads for Pause / Resume",Toast.LENGTH_LONG).show();
+       Toast.makeText(BrowserActivity.this,"Video download queued • See Downloads",Toast.LENGTH_LONG).show();
       });
+      if(variant.height==0)hlsUnknown.put(dialog,videos.getChildAt(videos.getChildCount()-1));
      }
-     if(rendered.add("audio-mp3"))settingRow(container,"♫  Audio • MP3","Extract audio from this accessible stream",()->{
+     if(rendered.add("audio-heading")){
+      TextView heading=text("DETECTED MEDIA • AUDIO",12,0xff74d8ff);
+      heading.setPadding(dp(8),dp(12),0,dp(8));audios.addView(heading,0);
+     }
+     if(rendered.add("audio-mp3"))settingRow(audios,"♫  Audio • MP3","Extract audio from this accessible stream",()->{
+      requestDownloadNotifications();
       dialog.dismiss();
       MediaDownloadService.enqueue(getApplicationContext(),playlist,
        new MediaDownloadEngine.Choice("Audio • MP3",0,"mp3"),referer,agent,mediaTitleForDownload(page));
      });
-     if(rendered.add("audio-m4a"))settingRow(container,"♫  Audio • M4A","Extract audio from this accessible stream",()->{
+     if(rendered.add("audio-m4a"))settingRow(audios,"♫  Audio • M4A","Extract audio from this accessible stream",()->{
+      requestDownloadNotifications();
       dialog.dismiss();
       MediaDownloadService.enqueue(getApplicationContext(),playlist,
        new MediaDownloadEngine.Choice("Audio • M4A",0,"m4a"),referer,agent,mediaTitleForDownload(page));
      });
     });
    }
-   @Override public void failed(String error){
-    runOnUiThread(()->{if(dialog.isShowing()){
-     TextView notice=text("Stream quality list unavailable; original stream may still be downloadable.",12,GRAY);
-     container.addView(notice);
-    }});
-   }
+   @Override public void failed(String error){/* Omit unavailable stream candidates without warnings. */}
   });
  }
  void addFormatChoices(LinearLayout options,String url,java.util.List<MediaDownloadEngine.Choice> choices,AlertDialog dialog){
