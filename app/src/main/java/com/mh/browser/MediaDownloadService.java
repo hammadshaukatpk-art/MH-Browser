@@ -21,6 +21,8 @@ public class MediaDownloadService extends Service {
  private final AtomicInteger active=new AtomicInteger();
  private NotificationManager manager;
  private static volatile MediaDownloadService liveService;
+ private volatile String foregroundTask;
+ private static final java.util.Set<String> deletedTasks=java.util.concurrent.ConcurrentHashMap.newKeySet();
  private static final java.util.concurrent.ConcurrentHashMap<String,Control> controls=new java.util.concurrent.ConcurrentHashMap<>();
  private static class Control implements MediaDownloadEngine.PauseControl{
   volatile boolean paused,done,cancelled;
@@ -63,7 +65,22 @@ public class MediaDownloadService extends Service {
  }
  private void deleteTask(String task){
   if(task==null||task.isEmpty())return;
-  Control c=controls.get(task);if(c!=null)c.cancel();
+  Control c=controls.get(task);
+  deletedTasks.add(task);
+  if(c!=null)synchronized(c){c.cancel();}
+  // Android owns the foreground-service notification until it is detached.
+  // Detach first, then cancel the exact notification for this task.
+  if(task.equals(foregroundTask)){
+   stopForeground(STOP_FOREGROUND_REMOVE);
+   foregroundTask=null;
+   for(java.util.Map.Entry<String,Control> entry:controls.entrySet()){
+    String other=entry.getKey();Control next=entry.getValue();
+    if(other.equals(task)||next.cancelled||next.done)continue;
+    foregroundTask=other;
+    startForeground(notificationId(other),notification("MH Browser • Downloading","Download in progress",0,true,false,other,next.paused));
+    break;
+   }
+  }
   manager.cancel(notificationId(task));
   synchronized(MediaDownloadService.class){
    android.content.SharedPreferences p=getSharedPreferences("mh",0);
@@ -75,7 +92,7 @@ public class MediaDownloadService extends Service {
   File partial=partial(this,task);if(partial.exists())partial.delete();
  }
  private void change(String task,boolean pause){
-  Control c=controls.get(task);if(c==null||c.done)return;
+  Control c=controls.get(task);if(c==null||c.done||deletedTasks.contains(task))return;
   c.change(pause);
   JSONArray a;try{a=new JSONArray(getSharedPreferences("mh",0).getString("downloads","[]"));}catch(Exception e){return;}
   for(int k=0;k<a.length();k++){JSONObject item=a.optJSONObject(k);if(item==null||!task.equals(item.optString("task")))continue;
@@ -169,8 +186,10 @@ public class MediaDownloadService extends Service {
        if(now-last>=700){
         int percent=total>0?(int)Math.min(99,Math.max(1,bytes*100/total)):1;
         String detail=total>0?formatSize(bytes)+" / "+formatSize(total):formatSize(bytes)+" downloaded";
-        save(task,name,"Downloading",percent,detail,null,null);
-        manager.notify(id,notification("MH Browser • Downloading",detail,percent,true,false,task,false,name));last=now;
+        synchronized(c){if(!c.cancelled&&!deletedTasks.contains(task)){
+         save(task,name,"Downloading",percent,detail,null,null);
+         manager.notify(id,notification("MH Browser • Downloading",detail,percent,true,false,task,false,name));
+        }}last=now;
        }
       }
       out.flush();
@@ -227,6 +246,7 @@ public class MediaDownloadService extends Service {
    String filename=safeName(intent.getStringExtra("filename"));
    int id=notificationId(task);
    active.incrementAndGet();
+   foregroundTask=task;
    startForeground(id,notification("MH Browser • Preparing download",filename,0,true,false,task,false));
    save(task,filename,"Preparing",0,"Connecting to website…",null,null);
    new Thread(()->runDirectDownload(task,id,startId,intent),"mh-file-download").start();
@@ -240,12 +260,13 @@ public class MediaDownloadService extends Service {
   int id=notificationId(task);
   active.incrementAndGet();
   // Android requires foreground service promotion promptly after startForegroundService.
+  foregroundTask=task;
   startForeground(id,notification("MH Browser • Preparing download",displayTitle,0,true,false,task,false));
   save(task,displayTitle,"Preparing",0,"Connecting to media source…",null,null);
   MediaDownloadEngine.download(getApplicationContext(),url,choice,intent.getStringExtra("referer"),intent.getStringExtra("userAgent"),intent.getStringExtra("titleHint"),control,new MediaDownloadEngine.Callback(){
    @Override public void ready(String title,java.util.List<MediaDownloadEngine.Choice> choices){}
    @Override public void progress(int percent,String line){
-    if(control.paused||control.cancelled||control.done)return;
+    if(control.paused||control.cancelled||control.done||deletedTasks.contains(task))return;
     long now=SystemClock.elapsedRealtime();
     Long last=lastWriteByTask.get(task);
     if(last!=null&&now-last<650&&percent<100)return;
@@ -254,8 +275,11 @@ public class MediaDownloadService extends Service {
     String amount=downloadAmount(task,line);
     boolean transferring=percent>0||!amount.isEmpty()||(line!=null&&line.contains("[download]"));
     String detail=transferring?(amount.isEmpty()?(speed.isEmpty()?"Receiving media…":speed):amount+(speed.isEmpty()?"":" • "+speed)):"Connecting to media…";
-    save(task,displayTitle,transferring?"Downloading":"Preparing",percent,detail,null,null);
-    manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",detail,percent,true,false,task,false,displayTitle));
+    synchronized(control){
+     if(control.cancelled||deletedTasks.contains(task))return;
+     save(task,displayTitle,transferring?"Downloading":"Preparing",percent,detail,null,null);
+     manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",detail,percent,true,false,task,false,displayTitle));
+    }
    }
    @Override public void completed(String name,String uri,String mime){
     if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}controls.remove(task,control);lastWriteByTask.remove(task);bytesByTask.remove(task);estimatedTotals.remove(task);finish(startId);return;}
@@ -278,6 +302,7 @@ public class MediaDownloadService extends Service {
  private synchronized void finish(int startId){
   if(active.decrementAndGet()<=0){
    stopForeground(STOP_FOREGROUND_DETACH);
+   foregroundTask=null;
    stopSelfResult(startId);
   }
  }
@@ -353,6 +378,7 @@ public class MediaDownloadService extends Service {
  }
  private void save(String task,String name,String state,int percent,String detail,String uri,String mime){
   synchronized(MediaDownloadService.class){
+   if(deletedTasks.contains(task))return;
    android.content.SharedPreferences p=getSharedPreferences("mh",0);
    JSONArray a;try{a=new JSONArray(p.getString("downloads","[]"));}catch(Exception ex){a=new JSONArray();}
    JSONObject record=null;
