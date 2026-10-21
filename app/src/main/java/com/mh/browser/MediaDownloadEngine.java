@@ -189,6 +189,8 @@ public final class MediaDownloadEngine {
    if(cookies!=null&&!cookies.isEmpty())req.addOption("--add-header","Cookie: "+cookies);
   }catch(Exception ignored){}
   req.addOption("--no-mtime");
+  req.addOption("--continue");
+  req.addOption("--no-overwrites");
   req.addOption("--concurrent-fragments","4");
   req.addOption("--retries","5");
   req.addOption("--fragment-retries","5");
@@ -211,14 +213,34 @@ public final class MediaDownloadEngine {
   }
   return req;
  }
- public interface PauseControl {void await() throws InterruptedException;}
+ public interface PauseControl {
+  void await() throws InterruptedException;
+  default long pauseGeneration(){return 0;}
+  default void processStarted(String id){}
+  default void processFinished(String id){}
+ }
  private static void runDownload(YoutubeDLRequest req,Callback callback,PauseControl control)throws Exception{
-  String processId="mh-"+UUID.randomUUID();
-  YoutubeDL.getInstance().execute(req,processId,false,(percent,eta,line)->{
-   try{control.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
-   callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
-   return kotlin.Unit.INSTANCE;
-  });
+  // Pause cancels the active yt-dlp subprocess. Resume re-launches with its
+  // existing .part files, rather than allowing the subprocess to download
+  // silently while the UI claims the transfer is paused.
+  while(true){
+   control.await();
+   long generation=control.pauseGeneration();
+   String processId="mh-"+UUID.randomUUID();
+   control.processStarted(processId);
+   try{
+    control.await();
+    YoutubeDL.getInstance().execute(req,processId,false,(percent,eta,line)->{
+     try{control.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
+     callback.progress(Math.max(0,Math.min(100,Math.round(percent))),line==null?"Downloading media":line);
+     return kotlin.Unit.INSTANCE;
+    });
+    if(control.pauseGeneration()==generation)return;
+   }catch(Exception ex){
+    if(control.pauseGeneration()==generation)throw ex;
+    // An explicit Pause stopped this run; retain fragments and wait for Resume.
+   }finally{control.processFinished(processId);}
+  }
  }
  public static void download(Context context,String url,Choice choice,Callback callback){
   download(context,url,choice,null,null,()->{},callback);
