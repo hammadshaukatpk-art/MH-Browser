@@ -72,7 +72,8 @@ public class MediaDownloadService extends Service {
   JSONArray a;try{a=new JSONArray(getSharedPreferences("mh",0).getString("downloads","[]"));}catch(Exception e){return;}
   for(int k=0;k<a.length();k++){JSONObject item=a.optJSONObject(k);if(item==null||!task.equals(item.optString("task")))continue;
    String name=item.optString("name","Download");int percent=item.optInt("progress");
-   save(task,name,pause?"Paused":"Downloading",percent,pause?"Paused by user":"Resuming…",null,null);
+   String oldDetail=item.optString("detail","");
+   save(task,name,pause?"Paused":"Downloading",percent,pause?(oldDetail.isEmpty()?"Paused by user":oldDetail):(oldDetail.isEmpty()?"Resuming…":oldDetail),null,null);
    manager.notify(notificationId(task),notification(pause?"MH Browser • Paused":"MH Browser • Downloading",name,percent,true,false,task,pause));break;
   }
  }
@@ -247,7 +248,7 @@ public class MediaDownloadService extends Service {
     manager.notify(id,notification(transferring?"MH Browser • Downloading":"MH Browser • Preparing download",displayTitle+" • "+detail,percent,true,false,task,false));
    }
    @Override public void completed(String name,String uri,String mime){
-    if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}return;}
+    if(control.cancelled){try{getContentResolver().delete(Uri.parse(uri),null,null);}catch(Exception ignored){}controls.remove(task,control);lastWriteByTask.remove(task);bytesByTask.remove(task);finish(startId);return;}
     save(task,name,"Completed",100,"Download complete",uri,mime);
     manager.notify(id,completedNotification(task,name,uri,mime));
     control.done=true;control.change(false);controls.remove(task,control);
